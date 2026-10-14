@@ -137,7 +137,7 @@ copy so SVG coordinates and dates do not match); the session-stop taste review
 also reads the quality validator (hotlinked stock, stat tiles, contact
 details) and flags missing PRODUCT.md alongside missing DESIGN.md on
 substantive work; detected slop rules subtract from the automated eval score;
-`npm run test:real:suite` runs the six normal-user prompt cases as release
+`node scripts/real-agent-eval.mjs --suite` runs the six normal-user prompt cases as release
 evidence; and designer-master states that stack choice for greenfield work is
 a decision (static HTML is correct for a landing page), not a habit. The
 live-run proof of the whole loop is the `verify-furniture` trace:
@@ -203,7 +203,7 @@ a browser, and reference research stays optional.
 ### New organs (architecture round)
 
 Five structural additions beyond rule tuning: `scripts/design-review-cli.mjs`
-(`npm run review:visual`) has a vision-capable model actually look at the
+(`node scripts/design-review-cli.mjs`) has a vision-capable model actually look at the
 screenshots and fill the shared rubric. It speaks any OpenAI-compatible
 vision endpoint directly (LM Studio locally by default; the OMP lm-studio
 bridge was silently broken in headless mode) and rejects instead of
@@ -222,7 +222,7 @@ session-stop taste review runs it only when `DESIGNER_REVIEW_MODEL` is set,
 feeding zero-scored categories and top fixes into the same bounded repair
 loop: the system sees its own output before shipping. First live review
 (local qwen3-vl-30b on the Leak page) returned a grounded "usable but not
-good enough" with mixed scores and actionable fixes. `npm run gallery`
+good enough" with mixed scores and actionable fixes. `node scripts/build-gallery.mjs`
 builds `test-output/gallery.html` — all runs' screenshots, scores, slop
 rules, and reviewer verdicts side by side. designer-master now prescribes a
 two-pass build (structure pass, capture, then art pass, with an early hero

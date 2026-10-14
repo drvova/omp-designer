@@ -7,11 +7,11 @@ including its case format, and it exists because "the prompt says to look at the
 page" is a claim, not evidence.
 
 ```
-npm run eval:list                     # every case and grader, no model call
-npm run eval                          # run the suite (spends model calls)
-npm run eval -- --case render-before-claim --runs 2
-npm run eval -- --ablation with-without     # also run with no plugin loaded
-npm run eval -- --session G:/site --transcript <session.jsonl>   # grade what exists
+node scripts/designer-eval.mjs --dry-run                    # every case and grader, no model call
+node scripts/designer-eval.mjs                              # run the suite (spends model calls)
+node scripts/designer-eval.mjs --case render-before-claim --runs 2
+node scripts/designer-eval.mjs --ablation with-without      # also run with no plugin loaded
+node scripts/designer-eval.mjs -- --session G:/site --transcript <session.jsonl>   # grade what exists
 ```
 
 ## A case is a prompt and some graders
@@ -84,7 +84,7 @@ Exit codes: **0** every case passed at or above `--threshold`, **1** nothing pas
 
 ## The manual half, and the honest limits
 
-- The arms that spend model calls are **not** part of `npm test`: they need
+- The arms that spend model calls are **not** part of the gate: they need
   credentials and they are stochastic. What *is* in the suite is the grading path —
   `test:eval-graders` grades the graders in both directions, and
   `test:eval-runner` grades recorded sessions end to end (`--session` +

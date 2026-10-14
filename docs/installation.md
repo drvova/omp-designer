@@ -13,16 +13,16 @@ source sitting next to you. That is the mistake this document exists to prevent.
 ## The rule
 
 ```
-DO      npm run install:local            # dry run: prints the plan, changes nothing
-DO      npm run install:local:clean      # apply: uninstall + link + run the gate
+DO      node scripts/install-local.mjs            # dry run: prints the plan, changes nothing
+DO      node scripts/install-local.mjs --apply --clean   # apply: uninstall + link + gate
 NEVER   omp install npm:omp-designer@latest
 NEVER   omp plugin install omp-designer
 NEVER   npm i -g omp-designer
 ```
 
 `install:local:clean` uninstalls whatever plugin is currently registered, keeps
-state (`designer-state.json`) and traces, runs `npm test` and
-`npm run check:release`, links this checkout with `omp plugin link <root> --force
+state (`designer-state.json`) and traces, runs the gate and
+`node scripts/check-release.mjs`, links this checkout with `omp plugin link <root> --force
 --scope user`, and then asserts that the plugin's real path **is** this package
 root and that the versions match. It refuses to finish otherwise.
 
@@ -36,7 +36,7 @@ enforcing a gate that this checkout does not contain.
 ```bash
 omp plugin list --json     # want: version 5.1.x, path ...\.omp\plugins\node_modules\omp-designer
 omp plugin doctor          # its omp-designer line must describe THIS fork
-npm run check:link         # identity check, exit 1 when the plugin is something else
+node scripts/check-plugin-link.mjs   # identity check, exits non-zero on another copy
 ```
 
 ```python
@@ -76,7 +76,7 @@ Any one of these is enough:
 ## Recovery
 
 ```bash
-npm run install:local:clean     # re-links and re-runs the gate
+node scripts/install-local.mjs --apply --clean   # re-links and re-runs the gate
 ```
 
 then restart omp. Nothing else is needed: no cache clearing, no reinstall. If a

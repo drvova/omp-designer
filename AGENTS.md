@@ -12,7 +12,6 @@ servers are optional and are never toggled by the extension.
 
 - Node.js 20.19 or newer
 - Pi or omp
-- `npm` and `npx`
 - a configured model provider
 
 Pi's basic read/write/edit/bash tools are sufficient for core work. Browser,
@@ -25,8 +24,8 @@ Use exactly one installation mechanism: **this checkout, linked.**
 
 ```bash
 cd /path/to/omp-designer
-npm run install:local          # dry run: prints the plan, changes nothing
-npm run install:local:clean    # links this checkout, keeps state and traces
+node scripts/install-local.mjs              # dry run: prints the plan, changes nothing
+node scripts/install-local.mjs --apply --clean   # links this checkout, keeps state and traces
 ```
 
 Do not install the published package for this fork:
@@ -39,7 +38,7 @@ pi install npm:omp-designer    # NO - same
 The published build and this checkout are different codebases. A published
 install leaves its own 12 skills and a v4 skill gate, and a running agent that
 loaded it keeps enforcing that gate (demanding skills this checkout does not
-ship) until the process is restarted. `install:local:clean` unregisters it,
+ship) until the process is restarted. A clean apply unregisters it,
 removes the npm dependency entry from `~/.omp/plugins/package.json` and
 `bun.lock`, and links this checkout as a junction.
 
@@ -54,36 +53,29 @@ Verify that this checkout is what leads, never the installer's own print:
 If upgrading from v4, use the lifecycle cleanup, install this checkout once,
 fully restart the agent, and run `/designer-doctor`.
 
-`npm run check:link` runs the identity check on demand (exit 1 when the
+`node scripts/check-plugin-link.mjs` runs the identity check on demand (non-zero when the
 registered plugin is something other than this checkout). Full procedure,
 recovery, and the symptoms of a published copy being live:
 [docs/installation.md](docs/installation.md).
-
-Published install:
-
-```bash
-npx --yes omp-designer@latest uninstall --apply
-omp install npm:omp-designer@latest
-```
 
 Local checkout:
 
 ```bash
 cd /path/to/omp-designer
-npm run system:inspect
-npm run install:local:clean
+node scripts/uninstall-system.mjs            # inspect what cleanup would remove
+node scripts/install-local.mjs --apply --clean
 ```
 
-`npm run` lifecycle commands require the checkout as the current directory. From
-any directory, invoke the installed package directly:
+The lifecycle scripts are run from the checkout. From any directory, invoke the
+installed copy directly:
 
 ```bash
 node "$HOME/.omp/plugins/node_modules/omp-designer/scripts/lifecycle-cli.mjs" uninstall --apply
 ```
 
-Lifecycle commands are dry-run by default. `install:local:clean` is the explicit
-exception: it cleans known v2 files, runs package checks, and links the current
-checkout. Its internal `--keep-data` preserves comparison traces. A direct
+Lifecycle commands are dry-run by default. A clean apply is the explicit
+exception: it cleans known v2 files, runs the gate and release checks, and links
+the current checkout. Its internal `--keep-data` preserves comparison traces. A direct
 `uninstall --apply` removes all package-owned OMP data by default. Neither path
 edits MCP configuration, general sessions, or unrelated memory.
 
@@ -143,16 +135,17 @@ Future agents working on this package must not:
   and must stay outside the repo; use `.env.example` as the template.
 - Reintroduce MCP mutation as a form of enforcement.
 
-Before any release decision, run the P0/P1/P2 checks: `npm test` (includes
-`test:e2e`), `npm run check:release`, and confirm the working tree is clean with a
+Before any release decision, run the P0/P1/P2 checks: `node scripts/gate.mjs` (which
+runs the package.json chain, host-bridge suite included), `node scripts/check-release.mjs`,
+and confirm the working tree is clean with a
 version bump. Skill-read observability is limited unless the host exposes read
 events; prove behavior through delivery checks and evals, not "all skills read".
 
 ## Required checks for package changes
 
 ```bash
-npm test
-npm run check:release
+node scripts/gate.mjs
+node scripts/check-release.mjs
 ```
 
 For changes that can affect generated output, also run a real-agent comparison:
@@ -166,7 +159,7 @@ node scripts/real-agent-eval.mjs \
 ```
 
 Keep generated projects and reports under `test-output/`. Reclaim disk with
-`npm run cleanup:artifacts` (dry-run first; `--apply` deletes generated runs and
+`node scripts/cleanup-artifacts.mjs` (dry-run first; `--apply` deletes generated runs and
 retains reports/e2e-canary evidence). Inspect at least one desktop and one mobile
 screenshot. The automated score covers delivery evidence,
 not visual quality; record visual findings separately.
@@ -182,7 +175,7 @@ mixed installation as release evidence.
 - Never place API keys, npm tokens, auth headers, or `.env` values in chat, CLI
   arguments, traces, fixtures, or commits. Keep `.env` outside the repo; if a live
   key was ever exposed in the working tree, rotate it.
-- Never publish before `npm run check:release`, and never publish from a dirty
+- Never publish before `node scripts/check-release.mjs`, and never publish from a dirty
   working tree or without a version bump.
 - Do not hardcode a user's home directory.
 - Preserve unrelated work in a dirty tree.

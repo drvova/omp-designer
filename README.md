@@ -13,31 +13,46 @@ model-backed visual reviewer, and a reproducible real-agent comparison harness.
 
 ## Install
 
-Install with exactly one mechanism:
+This checkout is the install. Point the host at it directly and prove the host
+really loaded it:
 
 ```bash
-# Pi
-pi install npm:omp-designer
-
-# oh-my-pi
-omp install npm:omp-designer
+node scripts/install-local.mjs            # dry run: prints the plan, changes nothing
+node scripts/install-local.mjs --apply --clean
+node scripts/check-plugin-link.mjs        # prove the registered plugin is this directory
 ```
 
-Do not also copy the extension into an agent extension directory. Duplicate
-install paths can register hooks twice. Run `/designer-doctor` if an older manual
-copy may still exist.
+`--apply --clean` clears the current registration and the known v2 manual copies,
+runs the [gate](#validation), then links this directory with `omp plugin link`.
+Restart the host afterwards and run `/designer-doctor`.
 
-### Working on this fork
+Install with **exactly one mechanism**. A second copy — a copied extension in an
+agent extension directory, or a registry install sitting beside the link — can
+register the hooks twice, and it replaces the link silently for later sessions.
+`check-plugin-link.mjs` exists to catch exactly that; it exits non-zero when the
+host is running something other than this directory.
 
-If you are running the checkout rather than the release, **link it — never
-install the published package beside it**, because installing replaces the fork
-silently for later sessions:
+Dry-run and explicit variants, all from this directory:
 
 ```bash
-npm run install:local         # dry run
-npm run install:local:clean   # uninstall + link + gate, then restart omp
-npm run check:link            # prove the registered plugin is this checkout
+node scripts/install-local.mjs              # preview only
+node scripts/install-local.mjs --apply      # link only; refuses a legacy mix
+node scripts/uninstall-system.mjs           # preview only
+node scripts/uninstall-system.mjs --apply   # remove all package-owned host data
 ```
+
+From any directory, address the installed copy directly:
+
+```bash
+# Preview
+node "$HOME/.omp/plugins/node_modules/omp-designer/scripts/lifecycle-cli.mjs" uninstall
+
+# Apply full uninstall
+node "$HOME/.omp/plugins/node_modules/omp-designer/scripts/lifecycle-cli.mjs" uninstall --apply
+```
+
+[docs/installation.md](docs/installation.md) has the full detail, the four
+verification proofs, and the symptoms of the wrong copy being live.
 
 Measuring the harness itself (did the session render the page, capture it after its
 last edit, and tell the truth about it): [docs/eval.md](docs/eval.md).
@@ -45,9 +60,6 @@ last edit, and tell the truth about it): [docs/eval.md](docs/eval.md).
 Working a design *with* someone — one open decision per turn, the choice made by
 clicking the canvas, the next turn told what was chosen:
 [docs/workshop.md](docs/workshop.md).
-
-Full detail, the four verification proofs, and the symptoms of a published copy
-being live: [docs/installation.md](docs/installation.md).
 
 The contract fragments are also real flags: `--designer-motion`,
 `--designer-dataviz`, `--designer-forms`, `--designer-verify`,
@@ -60,64 +72,20 @@ extension matches, which are partial, and which are deliberately not portable
 (a hosted artifact sandbox, a tenant flag service, an artifact data store). Every
 cc-side claim there cites the symbol or asset it was read from.
 
-### Published package
-
-For a normal published installation:
-
-```bash
-# Inspect only; this changes nothing
-npx --yes omp-designer@latest uninstall
-
-# Remove an existing plugin plus known v2 leftovers
-npx --yes omp-designer@latest uninstall --apply
-
-# Install one fresh published copy
-omp install npm:omp-designer@latest
-```
-
-Fully restart omp after changing the installation. Then run
-`/designer-doctor`. A normal uninstall removes plugin registration, known legacy
-copies, state, traces, and obsolete gate/phase data. MCP configuration,
-credentials, general OMP sessions, and unrelated agent memory are never changed.
-
-### Local checkout before publishing
+### Local checkout
 
 Use a plugin link when testing this checkout:
 
 ```bash
-cd /path/to/omp-designer
-npm run system:inspect
-npm run install:local:clean
+node scripts/install-local.mjs --apply --clean
+node scripts/uninstall-system.mjs            # inspect what cleanup would remove
 ```
 
-`install:local:clean` removes the current `omp-designer` registration and the
-known v2 manual extension/managed-skill copies, runs `npm test` and
-`npm run check:release`, then links this checkout with `omp plugin link`. It
-uses the explicit `--keep-data` path so comparison traces survive. Restart omp
-and run `/designer-doctor` before a real-agent comparison.
-
-Dry-run and explicit variants:
-
-```bash
-# Run these inside the repository
-npm run install:local          # preview only
-npm run install:local:apply    # link only; refuses a legacy mix
-npm run uninstall:system       # preview only
-npm run uninstall:system:apply # remove all package-owned OMP data
-```
-
-From any directory, address the currently installed OMP package directly:
-
-```bash
-# Preview
-node "$HOME/.omp/plugins/node_modules/omp-designer/scripts/lifecycle-cli.mjs" uninstall
-
-# Apply full uninstall
-node "$HOME/.omp/plugins/node_modules/omp-designer/scripts/lifecycle-cli.mjs" uninstall --apply
-```
-
-Do not install the npm package over a local link. Uninstall the local copy first,
-then install the published package. See
+`install-local.mjs --apply --clean` removes the current `omp-designer`
+registration and the known v2 manual extension/managed-skill copies, runs the
+gate and the release check, then links this checkout with `omp plugin link`. It
+uses the explicit `--keep-data` path so comparison traces survive. Restart the
+host and run `/designer-doctor` before a real-agent comparison. See
 [docs/install-lifecycle.md](docs/install-lifecycle.md) for the full transition
 matrix and retained-data policy.
 
@@ -180,7 +148,7 @@ Pi is prompt-only plus plan checks. It has no delivery-check backstop; the OMP
   credentials outside the repo (for example under `~/.config/…` sourced by your
   shell) and copy `.env.example` when you need a local `.env`.
 - If a live key was ever committed or left in the working tree, rotate it.
-- `npm run check:release` scans both the packed tarball and the repo working tree
+- `node scripts/check-release.mjs` scans both the packed tarball and the repo working tree
   (including dotfiles) for secret patterns. Placeholders such as
   `<YOUR_OPENAI_API_KEY>` are allowed; real-looking secrets fail the check.
 - Runtime trace redaction and the release scanner share one pattern source,
@@ -205,8 +173,10 @@ production configuration.
 ## Validation
 
 ```bash
-npm test
-npm run check:release
+node scripts/gate.mjs              # every suite in the package.json chain, in order
+node scripts/gate.mjs --only eval  # one family of suites while iterating
+node scripts/gate.mjs --list       # what the chain contains, without running it
+node scripts/check-release.mjs     # packed-file and secret checks before a release
 ```
 
 The quality validator blocks unsupported visible claims and commerce promises.
@@ -235,11 +205,11 @@ bounded repair continuation. Pi does not run this backstop.
 ### Simulated host-bridge and optional real smoke
 
 ```bash
-npm run test:e2e     # simulated OMP/Pi host contract against the real adapters
-npm run e2e:smoke    # same, as a reportable smoke run (add --real-omp to attempt)
+node scripts/gate.mjs --only host-bridge   # simulated OMP/Pi host contract, real adapters
+node scripts/e2e-smoke.mjs                 # same, as a reportable smoke run (--real-omp to attempt)
 ```
 
-`test:e2e` drives the real adapter hooks through a simulated host (no model, no
+The host-bridge suite drives the real adapter hooks through a simulated host (no model, no
 live OMP process): registration, one-time prompt injection, skill discovery,
 plan continuation exactness, delivery-check gating, duplicate-load, and the
 OMP/Pi capability difference. It is simulated evidence, not proof that a live
@@ -260,8 +230,8 @@ packed). This directory can grow to gigabytes; reclaim space with a dry-run-firs
 cleanup that retains the JSON reports and e2e-canary as release evidence:
 
 ```bash
-npm run cleanup:artifacts             # dry run: lists what it would remove
-npm run cleanup:artifacts -- --apply  # delete generated runs, keep evidence
+node scripts/cleanup-artifacts.mjs             # dry run: lists what it would remove
+node scripts/cleanup-artifacts.mjs --apply     # delete generated runs, keep evidence
 ```
 
 Real-agent runs themselves:
@@ -283,9 +253,9 @@ v5 plugin source. The harness does not add a second explicit extension path.
 
 This harness is a manual tool: it needs a local `omp`, a model provider, and
 credentials, and its artifacts live in untracked `test-output/`. It is not part
-of `npm test` and is not automated clean-install E2E evidence. The simulated
-`test:e2e` host-bridge suite is the automated adapter evidence; a real-model run
-here is complementary manual verification.
+of the gate and is not automated clean-install E2E evidence. The simulated
+host-bridge suite is the automated adapter evidence; a real-model run here is
+complementary manual verification.
 
 Its numeric score measures delivery evidence, not visual taste. Screenshots must
 still be reviewed. A valid iteration is:
@@ -301,7 +271,7 @@ Earlier v5 agent runs were useful runtime and validator comparisons, but the hos
 still contained a disabled v2 extension and 12 legacy managed-skill directories.
 They were therefore not clean-install E2E evidence. Lifecycle behavior is now
 covered in an isolated temporary HOME, and the R8 DeepSeek comparison was run
-after `install:local:clean` with one v5 plugin source and no explicit extension
+after a clean link with one v5 plugin source and no explicit extension
 double-load.
 
 ## Commands
@@ -315,7 +285,7 @@ double-load.
 
 ## Model-backed visual review
 
-`npm run review:visual -- --target <project>` has a vision-capable model look
+`node scripts/design-review-cli.mjs --target <project>` has a vision-capable model look
 at the project's screenshots and fill a structured design rubric (verdict,
 the one memorable thing, top fixes), saved as `design-review.json`.
 
@@ -332,7 +302,7 @@ the one memorable thing, top fixes), saved as `design-review.json`.
   review feed the reviewer's zero-scored categories and top fixes into the
   bounded repair loop.
 
-`npm run gallery` builds `test-output/gallery.html`: every run's screenshots,
+`node scripts/build-gallery.mjs` builds `test-output/gallery.html`: every run's screenshots,
 scores, slop-rule hits, and reviewer verdicts side by side.
 
 ## Runtime structure
@@ -341,12 +311,14 @@ scores, slop-rule hits, and reviewer verdicts side by side.
 extension/index.ts               omp extension (prompt, plan checks, delivery backstop)
 extensions/designer.ts           Pi extension (prompt + plan checks, no backstop)
 shared/security.mjs              shared secret patterns for redaction and release scan
+shared/workshop.mjs              the workshop decision loop: question block, log, panel
 skills/                          nine skills (incl. run, run-skill-generator, dataviz, workshop)
 scripts/designer-driver.mjs      browser driver: captures, console errors, driver-report.json
 scripts/designer-canvas.mjs      canvas: every board and capture on one page (+ canvas.json)
 scripts/designer-eval.mjs        eval suite: cases + graders, with/without arms (docs/eval.md)
+scripts/gate.mjs                 the whole test chain, in order, with no package manager
 evals/                           the shipped cases (prompt.md + graders/*.md)
-scripts/check-plugin-link.mjs    proves the installed plugin is this checkout, not the npm copy
+scripts/check-plugin-link.mjs    proves the installed plugin is this checkout, not another copy
 data/ui-ux-pro-max/              palette and typography search data
 scripts/fix-ai-slop.mjs          evidence-aware copy validator
 scripts/analyze-layout.mjs       proportional layout/contrast validator
@@ -359,6 +331,7 @@ shared/screenshot-analysis.mjs   PNG decoder + blank-band metrics
 data/gallery/                    three golden reference pages
 data/qa/overlap-check.js         browser overlap/clipping QA snippet
 scripts/e2e-smoke.mjs            simulated host-bridge smoke runner (optional --real-omp)
+scripts/gate.mjs                 runs every suite in the package.json chain, no package manager
 scripts/check-release.mjs        packed-artifact and repo-wide secret release gate
 scripts/cleanup-artifacts.mjs    dry-run-first cleanup for generated test-output
 scripts/install-local.mjs        safe local-link installer
@@ -370,7 +343,6 @@ scripts/__tests__/host-bridge.test.ts  simulated OMP/Pi host-contract tests
 
 - Node.js 20.19 or newer
 - Pi or omp
-- `npm`/`npx`
 - a configured model provider for real-agent evaluations
 
 No API key belongs in this repository, chat transcript, command argument, or

@@ -57,7 +57,7 @@ feature:
 
 1. ~~**Phase 4 — grade it.**~~ — **done**: `designer-eval` ships three cases with
    graders for exactly those three questions, the graders are themselves graded in
-   `npm test`, and `--ablation with-without` gives the delta against a session with
+   the package.json gate chain, and `--ablation with-without` gives the delta against a session with
    no plugin. What is still missing from cc's harness: mocked MCP servers, a
    cost ceiling, and a judge model wired by default.
 2. ~~Close the diagnostic gap that needs no host~~ — **done**: the driver now

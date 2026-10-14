@@ -10,13 +10,12 @@ From a checkout:
 
 ```bash
 cd /path/to/omp-designer
-npm run system:inspect
+node scripts/uninstall-system.mjs
 ```
 
 From the published package:
 
 ```bash
-npx --yes omp-designer@latest uninstall
 ```
 
 Both commands are dry-runs. They report the current plugin, lock metadata, the
@@ -26,7 +25,7 @@ They do not invoke an uninstall command or change files.
 ## Test a local checkout
 
 ```bash
-npm run install:local:clean
+node scripts/install-local.mjs --apply --clean
 ```
 
 This command:
@@ -34,7 +33,7 @@ This command:
 1. asks omp to uninstall the registered `omp-designer` plugin,
 2. removes only the known v2 manual extension and managed-skill directories,
 3. explicitly preserves designer state and traces needed for comparison,
-4. runs `npm test` and `npm run check:release`,
+4. runs the gate and the release check,
 5. links the current checkout with `omp plugin link`,
 6. verifies the linked path, package version, and absence of v2 leftovers.
 
@@ -43,8 +42,8 @@ source, four skills, and no duplicate-load risk before using a real-agent run as
 release evidence. The real-agent harness verifies this installation state and
 does not pass a second explicit extension path to OMP.
 
-Use `npm run install:local:apply` only when inspection already shows no legacy
-mix. It refuses to proceed if old v2 files exist. `npm run install:local` is its
+Use `node scripts/install-local.mjs --apply` only when inspection already shows no legacy
+mix. It refuses to proceed if old v2 files exist. `node scripts/install-local.mjs` is its
 dry-run.
 
 ## Switch from local to published
@@ -52,15 +51,14 @@ dry-run.
 Do not install the npm package over the local link:
 
 ```bash
-npm run uninstall:system:apply
+node scripts/uninstall-system.mjs --apply
 omp install npm:omp-designer@latest
 ```
 
 When working outside a checkout, the published CLI can uninstall itself:
 
 ```bash
-npx --yes omp-designer@latest uninstall --apply
-omp install npm:omp-designer@latest
+omp install npm:omp-designer@latest   # the published line, which this fork never links over
 ```
 
 Fully restart omp and run `/designer-doctor`.
@@ -71,8 +69,8 @@ Repository commands require the checkout as the current directory:
 
 ```bash
 cd /path/to/omp-designer
-npm run uninstall:system
-npm run uninstall:system:apply
+node scripts/uninstall-system.mjs
+node scripts/uninstall-system.mjs --apply
 ```
 
 From any directory, use the currently installed OMP package:
@@ -88,7 +86,6 @@ node "$HOME/.omp/plugins/node_modules/omp-designer/scripts/lifecycle-cli.mjs" un
 After v5 is published, the equivalent download-and-run form is:
 
 ```bash
-npx --yes omp-designer@latest uninstall --apply
 ```
 
 Normal uninstall removes all package-owned OMP data:
@@ -102,7 +99,7 @@ Normal uninstall removes all package-owned OMP data:
 Preserving state and traces is only intended for a local reinstall:
 
 ```bash
-npm run uninstall:system:apply -- --keep-data
+node scripts/uninstall-system.mjs --apply -- --keep-data
 ```
 
 The lifecycle scripts never read, write, or remove `mcp.json`, API keys, npm

@@ -50,8 +50,13 @@ const checks = [
   // The skill set present in the primary docs.
   ["README mentions the skill set", /nine skills/i.test(readme)],
   // The fork-first rule is a document and a guard, not a memory.
-  ["installation doc states the link-never-npm rule", /npm run install:local:clean/.test(installation) && /NEVER\s+omp install npm:omp-designer/.test(installation)],
-  ["installation doc names the verification and the guard", /check:link/.test(installation) && /realpath/.test(installation)],
+  ["installation doc states the link-not-a-second-copy rule", /node scripts\/install-local\.mjs --apply --clean/.test(installation) && /NEVER\s+omp install npm:omp-designer/.test(installation)],
+  // This fork documents itself without a package manager: the commands it prints
+  // are the ones that run, so a reader never needs npm or bun to follow them.
+  ["README prints no package-manager command", !/\bnpm (run|install|test|ci)\b/.test(readme) && !/\bnpx\b/.test(readme)],
+  ["README documents the gate runner", /node scripts\/gate\.mjs/.test(readme) && /--only/.test(readme)],
+  ["installation doc prints no package-manager command", !/\bnpm run\b/.test(installation)],
+  ["installation doc names the verification and the guard", /check-plugin-link\.mjs/.test(installation) && /realpath/.test(installation)],
   ["README points at the installation doc", /docs\/installation\.md/.test(readme)],
   // The parity doc must keep naming what is not portable, not just what matches.
   ["eval doc documents every grader type", /driver_ran/.test(evalDoc) && /captures_fresh/.test(evalDoc) && /claims_consistent/.test(evalDoc) && /skipped/.test(evalDoc)],
