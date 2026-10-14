@@ -19,7 +19,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { writeCanvasFiles } from "../shared/design-canvas.mjs";
+import { serveCanvas, writeCanvasFiles } from "../shared/design-canvas.mjs";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -48,20 +48,34 @@ export function writeCanvas({ project = process.cwd(), title = "", out = "" } = 
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 if (isMain) {
-  const args = process.argv.slice(2);
+  await main(process.argv.slice(2));
+}
+
+/** Parse arguments and either serve the canvas live or write it once. */
+async function main(args) {
   if (args.includes("--help") || args.includes("-h")) {
-    console.log("designer-canvas [--project <dir>] [--title <name>] [--out <file>] [--open] [--json]");
-    process.exitCode = 0;
-  } else {
-    const result = writeCanvas({
-      project: value(args, "--project", process.cwd()),
-      title: value(args, "--title", ""),
-      out: value(args, "--out", ""),
-    }, args.includes("--json") ? { log() {}, error: console.error } : console);
-    if (args.includes("--json")) console.log(JSON.stringify(result));
-    if (args.includes("--open") && result.path) {
-      spawn("cmd", ["/c", "start", "", pathToFileURL(result.path).href], { detached: true, stdio: "ignore", windowsHide: true }).unref();
-    }
-    process.exitCode = result.code;
+    console.log(`designer-canvas [--project <dir>] [--title <name>] [--out <file>] [--open] [--json]
+                 [--serve [--port <n>]]   live canvas: rebuild + reload open viewers on change`);
+    return;
   }
+  const project = value(args, "--project", process.cwd());
+  const title = value(args, "--title", "");
+  if (args.includes("--serve")) {
+    const live = await serveCanvas({ cwd: resolve(project), port: Number(value(args, "--port", "0")), title });
+    if (args.includes("--open")) {
+      spawn("cmd", ["/c", "start", "", live.url], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    }
+    if (args.includes("--open")) {
+      spawn("cmd", ["/c", "start", "", live.url], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    }
+    console.log(`designer-canvas: live at ${live.url} (Ctrl+C to stop)`);
+    process.on("SIGINT", () => { live.close(); process.exit(0); });
+    return;
+  }
+  const result = writeCanvas(
+    { project, title, out: value(args, "--out", "") },
+    args.includes("--json") ? { log() {}, error: console.error } : console,
+  );
+  if (args.includes("--json")) console.log(JSON.stringify(result));
+  process.exitCode = result.code;
 }

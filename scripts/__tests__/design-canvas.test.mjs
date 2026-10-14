@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildCanvas,
+  serveCanvas,
   CANVAS_HTML_FILE,
   CANVAS_INDEX_FILE,
   collectBoards,
@@ -23,8 +24,11 @@ import {
 } from "../../shared/design-canvas.mjs";
 
 let checks = 0;
-const ok = (label, fn) => {
-  fn();
+// Async-aware: an un-awaited async body let the end-of-file cleanup delete a
+// fixture while the server under test was still serving it, which read as the
+// canvas emptying itself.
+const ok = async (label, fn) => {
+  await fn();
   checks += 1;
   console.log(`ok - ${label}`);
 };
@@ -60,7 +64,7 @@ const makeProject = ({ report = goodReport, boards = ["Home.dc.html", "Pricing.d
   return dir;
 };
 
-ok("authored boards come first, then the captures the driver reported", () => {
+await ok("authored boards come first, then the captures the driver reported", () => {
   const dir = makeProject();
   const collected = collectBoards(dir, "Atelier");
   assert.equal(collected.title, "Atelier");
@@ -71,17 +75,22 @@ ok("authored boards come first, then the captures the driver reported", () => {
   assert.match(String(collected.boards[2].note), /driver ok/);
 });
 
-ok("a failed driver run is visible on the board it produced", () => {
+await ok("a failed driver run is visible on the board it produced", () => {
   const dir = makeProject({ report: { ...goodReport, ok: false, reason: "url-unreachable", captures: [] } });
   const collected = collectBoards(dir, "");
-  assert.equal(collected.boards.length, 2, "no captures when the driver produced none");
+  // The run produced no captures, but the two PNGs on disk are still boards: a
+  // capture the report does not mention must not become invisible.
+  assert.equal(collected.boards.length, 4);
+  const unreported = collected.boards.filter((board) => board.kind === "capture");
+  assert.equal(unreported.length, 2);
+  assert.match(String(unreported[0].note), /not in the last driver run/);
   const failing = makeProject({ report: { ...goodReport, ok: false, reason: "blank-capture", captures: [{ path: "screenshots/desktop-1440.png", width: 1440, blank: true }] } });
   const flagged = collectBoards(failing, "").boards.find((board) => board.kind === "capture");
   assert.match(String(flagged?.note), /driver failed: blank-capture/);
   assert.match(String(flagged?.note), /capture is blank/);
 });
 
-ok("without a report the screenshots directory is still shown", () => {
+await ok("without a report the screenshots directory is still shown", () => {
   const dir = makeProject({ report: null });
   const collected = collectBoards(dir, "");
   const captures = collected.boards.filter((board) => board.kind === "capture");
@@ -89,7 +98,7 @@ ok("without a report the screenshots directory is still shown", () => {
   assert.match(String(captures[0].note), /no driver report/);
 });
 
-ok("layout is deterministic and wraps into columns", () => {
+await ok("layout is deterministic and wraps into columns", () => {
   const boards = [{ name: "a" }, { name: "b" }, { name: "c" }];
   const first = layoutBoards(boards);
   const second = layoutBoards(boards);
@@ -100,7 +109,7 @@ ok("layout is deterministic and wraps into columns", () => {
   assert.deepEqual(first.order, ["a", "b", "c"]);
 });
 
-ok("a hostile board name is escaped in markup and in the embedded index", () => {
+await ok("a hostile board name is escaped in markup and in the embedded index", () => {
   const hostile = '"><script>alert(1)</script>';
   const boards = [{ name: hostile, kind: "board", href: "project/x.dc.html", width: 760, height: 520, note: "board file" }];
   const index = layoutBoards(boards);
@@ -112,7 +121,7 @@ ok("a hostile board name is escaped in markup and in the embedded index", () => 
   assert.ok(html.includes("window.__canvas ="), "index embedded for tooling");
 });
 
-ok("the writer produces both files, and the read-back reports boards and age", () => {
+await ok("the writer produces both files, and the read-back reports boards and age", () => {
   const dir = makeProject();
   const written = writeCanvasFiles(dir, { title: "Atelier" });
   assert.equal(written.boards, 4);
@@ -127,7 +136,7 @@ ok("the writer produces both files, and the read-back reports boards and age", (
   assert.ok((readBack?.htmlBytes ?? 0) > 0);
 });
 
-ok("an empty project still builds a canvas that says so", () => {
+await ok("an empty project still builds a canvas that says so", () => {
   const dir = makeDir("empty");
   const built = buildCanvas({ cwd: dir, title: "", generatedAt: "2026-10-13T00:00:00.000Z" });
   assert.equal(built.boards.length, 0);
@@ -137,6 +146,38 @@ ok("an empty project still builds a canvas that says so", () => {
   const readBack = readCanvasIndex(dir);
   assert.equal(readBack?.boards, 0);
   assert.equal(readBack?.htmlExists, true);
+});
+
+await ok("the live server rebuilds on change and pushes a reload", async () => {
+  const dir = makeProject();
+  const live = await serveCanvas({ cwd: dir, port: 0 }, { log() {}, error() {} });
+  const page = await fetch(live.url).then((response) => response.text());
+  assert.match(page, /designer-canvas|design canvas/);
+  const served = await fetch(`${live.url}canvas.json`).then((response) => response.json());
+  assert.equal(served.order?.length, 4, "the served index lists the project's boards");
+
+  // Subscribe, then write a new capture the way the driver would.
+  const stream = await fetch(`${live.url}events`);
+  const reader = stream.body.getReader();
+  const decoder = new TextDecoder();
+  await reader.read(); // the initial comment flushes the headers
+  mkdirSync(join(dir, "screenshots"), { recursive: true });
+  writeFileSync(join(dir, "screenshots", "tablet-768.png"), "png");
+  const deadline = Date.now() + 8000;
+  let sawReload = "";
+  while (Date.now() < deadline && !sawReload.includes("reload")) {
+    const chunk = await Promise.race([
+      reader.read(),
+      new Promise((done) => setTimeout(() => done({ value: undefined }), 500)),
+    ]);
+    if (chunk.value) sawReload += decoder.decode(chunk.value);
+  }
+  assert.match(sawReload, /reload/, "an open viewer is told when the canvas changed");
+  const after = JSON.parse(readFileSync(join(dir, "canvas.json"), "utf8"));
+  assert.equal(after.order.length, 5, "the new capture joined the canvas");
+  assert.equal(await fetch(`${live.url}../secrets.txt`).then((response) => response.status), 404, "no traversal");
+  reader.cancel().catch(() => {});
+  live.close();
 });
 
 for (const dir of dirs) rmSync(dir, { recursive: true, force: true });

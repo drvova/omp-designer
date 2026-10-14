@@ -163,6 +163,12 @@ writes a report saying so and exits 2, because a page that was never rendered is
 not evidence. `shared/driver-report.mjs` holds the report contract — a report
 that is missing, truncated, or malformed reads as no evidence, never as success.
 
+`scripts/designer-canvas.mjs --serve` runs the canvas live: a local HTTP server over
+the project, watching for changes, rebuilding and pushing a reload over SSE, so a
+capture the driver writes shows up without anyone refreshing. Reads are served from
+the project with a traversal guard, and a capture the driver's report does not
+mention is still a board — a hand-dropped screenshot must not be invisible.
+
 `scripts/designer-canvas.mjs` (and the `/designer-canvas` command) assembles the
 canvas: authored `project/*.dc.html` boards plus the driver's captures, laid out
 on one deterministic grid with an index in claude-code's shape

@@ -12,7 +12,8 @@
  * pure, so the whole surface is testable without a browser.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readDriverReport } from "./driver-report.mjs";
 
@@ -36,12 +37,24 @@ const escapeHtml = (value) =>
 
 const escapeJson = (value) => JSON.stringify(value).replaceAll("<", "\\u003c");
 
-const listFiles = (dir, test) => {
-  try {
-    return readdirSync(dir).filter((name) => test(name)).sort();
-  } catch {
-    return [];
+/**
+ * Names in a directory, or null when the directory cannot be read right now.
+ *
+ * The distinction matters: on Windows a listing during concurrent writes fails
+ * transiently (EPERM/EBUSY), and treating that as "no files" let a rebuild
+ * overwrite a good canvas with an empty one. Missing is [], unreadable is null.
+ */
+const listFiles = (dir) => {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return readdirSync(dir);
+    } catch (error) {
+      const code = error && typeof error === "object" ? error.code : undefined;
+      if (code === "ENOENT") return [];
+      if (attempt === 1) return null;
+    }
   }
+  return null;
 };
 
 /**
@@ -58,8 +71,18 @@ export function collectBoards(cwd, title = "") {
   const driverRun = readDriverReport(cwd);
   const report = driverRun?.report ?? null;
 
+  let unreadable = false;
+  const names = (dir, test) => {
+    const entries = listFiles(dir);
+    if (entries === null) {
+      unreadable = true;
+      return [];
+    }
+    return entries.filter((name) => test(name)).sort();
+  };
+
   const boardDir = join(cwd, "project");
-  for (const name of listFiles(boardDir, (entry) => /\.(?:dc|board)\.html$/i.test(entry))) {
+  for (const name of names(boardDir, (entry) => /\.(?:dc|board)\.html$/i.test(entry))) {
     boards.push({
       name,
       kind: "board",
@@ -69,7 +92,7 @@ export function collectBoards(cwd, title = "") {
       note: "board file",
     });
   }
-  for (const name of listFiles(cwd, (entry) => /\.board\.html$/i.test(entry))) {
+  for (const name of names(cwd, (entry) => /\.board\.html$/i.test(entry))) {
     boards.push({
       name,
       kind: "board",
@@ -80,18 +103,30 @@ export function collectBoards(cwd, title = "") {
     });
   }
 
+  // The report's captures carry its outcome; any other PNG in the project is
+  // still a board. A capture the report does not mention (dropped in by hand, or
+  // written by another tool) must not be invisible just because a report exists.
   const captures = [];
+  const reported = new Set();
   if (report) {
     const outcome = report.ok
       ? `driver ok, ${report.consoleErrors.length + report.pageErrors.length + report.failedRequests.length} console problems`
       : `driver failed: ${report.reason}`;
     for (const capture of report.captures) {
-      captures.push({ file: capture.path, width: capture.width, blank: capture.blank, note: outcome });
+      const file = String(capture.path).split("\\").join("/");
+      reported.add(file.toLowerCase());
+      captures.push({ file, width: capture.width, blank: capture.blank, note: outcome });
     }
-  } else {
-    for (const name of listFiles(join(cwd, "screenshots"), (entry) => /\.png$/i.test(entry))) {
-      captures.push({ file: `screenshots/${name}`, width: null, blank: false, note: "capture (no driver report)" });
-    }
+  }
+  for (const name of names(join(cwd, "screenshots"), (entry) => /\.png$/i.test(entry))) {
+    const file = `screenshots/${name}`;
+    if (reported.has(file.toLowerCase())) continue;
+    captures.push({
+      file,
+      width: null,
+      blank: false,
+      note: report ? "capture (not in the last driver run)" : "capture (no driver report)",
+    });
   }
   for (const capture of captures) {
     if (!existsSync(join(cwd, capture.file))) continue;
@@ -112,6 +147,7 @@ export function collectBoards(cwd, title = "") {
     boards,
     driver: report,
     root: cwd,
+    unreadable,
   };
 }
 
@@ -254,12 +290,142 @@ ${cards || '    <p class="empty">No boards yet. Run the driver or add <code>proj
  */
 export function writeCanvasFiles(cwd, { title = "", generatedAt = new Date().toISOString(), columns = COLUMNS } = {}) {
   const built = buildCanvas({ cwd, title, generatedAt, columns });
+  // A transient unreadable directory must never empty a canvas that had boards:
+  // report the previous state instead of writing a wrong one.
+  if (built.unreadable && built.boards.length === 0) {
+    const previous = readCanvasIndex(cwd);
+    if (previous && previous.boards > 0) {
+      return {
+        htmlPath: previous.htmlPath,
+        indexPath: previous.path,
+        boards: previous.boards,
+        index: JSON.parse(readFileSync(previous.path, "utf8")),
+        skipped: "unreadable",
+      };
+    }
+  }
   const htmlPath = join(cwd, CANVAS_HTML_FILE);
   const indexPath = join(cwd, CANVAS_INDEX_FILE);
   mkdirSync(dirname(htmlPath), { recursive: true });
   writeFileSync(htmlPath, built.html);
   writeFileSync(indexPath, `${JSON.stringify(built.index, null, 2)}\n`);
   return { htmlPath, indexPath, boards: built.boards.length, index: built.index };
+}
+
+/**
+ * Serve the canvas live.
+ *
+ * claude-code's canvas is a surface in the app: a board appears the moment its
+ * publish lands, and open viewers get the change without asking. This is the local
+ * equivalent — an HTTP server over the project that rebuilds on any change and
+ * pushes a reload over SSE, so a capture the driver writes shows up on its own.
+ *
+ * Files are served relative to the project with a traversal guard, because the
+ * board files and captures are the page's own assets.
+ */
+export function serveCanvas({ cwd, port = 0, title = "", host = "127.0.0.1" } = {}, io = console) {
+  const root = cwd;
+  const clients = new Set();
+  let timer = null;
+
+  const rebuild = () => {
+    try {
+      const written = writeCanvasFiles(root, { title });
+      if (written.skipped) io.log?.(`designer-canvas: kept ${written.boards} boards (the project was unreadable for a moment)`);
+      return written.boards;
+    } catch (error) {
+      io.error?.(`designer-canvas: rebuild failed (${error instanceof Error ? error.message : String(error)})`);
+      return 0;
+    }
+  };
+
+  const broadcast = () => {
+    for (const response of clients) {
+      try {
+        response.write("data: reload\n\n");
+      } catch {
+        clients.delete(response);
+      }
+    }
+  };
+
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", `http://${host}`);
+    if (url.pathname === "/events") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-store",
+        connection: "keep-alive",
+      });
+      response.write(": connected\n\n");
+      clients.add(response);
+      request.on("close", () => clients.delete(response));
+      return;
+    }
+    if (url.pathname === "/canvas.json") {
+      const index = join(root, CANVAS_INDEX_FILE);
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(existsSync(index) ? readFileSync(index) : "{}");
+      return;
+    }
+    const relative = url.pathname === "/" ? CANVAS_HTML_FILE : decodeURIComponent(url.pathname).replace(/^\/+/, "");
+    const target = join(root, relative);
+    const inside = relative.length > 0 && !relative.includes("..") && target.startsWith(root);
+    if (!inside || !existsSync(target) || !statSync(target).isFile()) {
+      response.writeHead(404, { "content-type": "text/plain" });
+      response.end("not found");
+      return;
+    }
+    const extension = relative.slice(relative.lastIndexOf(".")).toLowerCase();
+    const types = {
+      ".html": "text/html; charset=utf-8",
+      ".json": "application/json",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp",
+      ".svg": "image/svg+xml",
+      ".css": "text/css",
+      ".js": "text/javascript",
+      ".mjs": "text/javascript",
+    };
+    response.writeHead(200, { "content-type": types[extension] ?? "application/octet-stream", "cache-control": "no-store" });
+    response.end(readFileSync(target));
+  });
+
+  const watcher = watch(root, { recursive: true }, (_event, filename) => {
+    if (filename && /node_modules|\\.git|designer-canvas\\.html$|canvas\\.json$/.test(String(filename))) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      rebuild();
+      broadcast();
+    }, 150);
+  });
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    server.once("error", rejectPromise);
+    server.listen(port, host, () => {
+      const address = server.address();
+      const boundPort = typeof address === "object" && address ? address.port : port;
+      const boards = rebuild();
+      const url = `http://${host}:${boundPort}/`;
+      io.log?.(`designer-canvas: serving ${boards} board${boards === 1 ? "" : "s"} at ${url} (live)`);
+      resolvePromise({
+        url,
+        port: boundPort,
+        boards,
+        close: () => {
+          if (timer) clearTimeout(timer);
+          watcher.close();
+          for (const response of clients) {
+            try { response.end(); } catch { /* already gone */ }
+          }
+          clients.clear();
+          server.close();
+        },
+      });
+    });
+  });
 }
 
 /** The last written canvas index, with how old it is, or null when there is none. */
