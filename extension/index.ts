@@ -32,6 +32,7 @@ import { redactSecrets } from "../shared/security.mjs";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
 import { claimFindings } from "../shared/delivery-claims.mjs";
 import { readDriverReport, summarizeDriver } from "../shared/driver-report.mjs";
+import { readCanvasIndex, writeCanvasFiles } from "../shared/design-canvas.mjs";
 import { collectSkillUsage } from "../shared/skill-usage.mjs";
 import { resolveFlags, describeFlags } from "../shared/designer-flags.mjs";
 
@@ -245,7 +246,7 @@ const CONTRACT_FRAGMENTS: Record<string, string> = {
   motion: `\n\n## Motion is in scope for this request\nRead ${join(SKILLS_ROOT, "animate.md")} before writing transitions. One orchestrated moment beats scattered effects; reduced motion and a no-JS load must still show every section.`,
   dataviz: `\n\n## Charts or numbers are in scope for this request\nDraw marks, ticks, and labels on one scale and label only values the data actually reaches. Take chart text from the theme tokens so both themes read. A chart that decorates or exaggerates is a failure, not a flourish.`,
   forms: `\n\n## Interactive input is in scope for this request\nGive every control a stable id and a visible focus state, and route submissions to a real destination. Never simulate success: an in-page confirmation that delivers nothing is a false claim about the product.`,
-  verify: `\n\n## Seeing it work is in scope for this request\nRead ${join(SKILLS_ROOT, "run.md")} before claiming anything about the rendered page. Launch the real app and drive it: a project run skill (\`.omp/skills/run-*/SKILL.md\`) if one exists, otherwise \`node ${join(SCRIPTS_ROOT, "designer-driver.mjs")} --start "<the project's start command>" --url <url>\`, which captures 1440 and 375, collects console errors, and writes \`screenshots/driver-report.json\`. Look at the captures. If launching took real work, generate a run skill with ${join(SKILLS_ROOT, "run-skill-generator.md")} instead of rediscovering it next time. A blank frame is a failure to launch, and a page you never opened has no result to report.`,
+  verify: `\n\n## Seeing it work is in scope for this request\nRead ${join(SKILLS_ROOT, "run.md")} before claiming anything about the rendered page. Launch the real app and drive it: a project run skill (\`.omp/skills/run-*/SKILL.md\`) if one exists, otherwise \`node ${join(SCRIPTS_ROOT, "designer-driver.mjs")} --start "<the project's start command>" --url <url>\`, which captures 1440 and 375, collects console errors, and writes \`screenshots/driver-report.json\`. Look at the captures. If launching took real work, generate a run skill with ${join(SKILLS_ROOT, "run-skill-generator.md")} instead of rediscovering it next time. The run leaves a canvas beside the captures (\`designer-canvas.html\`, rebuilt by \`node ${join(SCRIPTS_ROOT, "designer-canvas.mjs")}\`) showing every board and capture at once. A blank frame is a failure to launch, and a page you never opened has no result to report.`,
 };
 
 // Request words that put a concern in scope, and the dependencies that prove it
@@ -562,6 +563,18 @@ function projectRunSkill(cwd: string): string | null {
   return null;
 }
 
+/** One doctor line for the last canvas build. */
+function describeCanvas(cwd: string): string {
+  const canvas = readCanvasIndex(cwd);
+  if (!canvas) return "none";
+  const age = canvas.ageMinutes === null
+    ? "age unknown"
+    : canvas.ageMinutes < 1
+      ? "just built"
+      : `built ${canvas.ageMinutes}m ago`;
+  return `${canvas.boards} board${canvas.boards === 1 ? "" : "s"}, ${age}${canvas.htmlExists ? "" : " (index only)"}`;
+}
+
 function doctorReport(cwd: string): string {
   const moduleRealpath = safeRealpath(MODULE_FILE);
   const legacyRealpath = safeRealpath(LEGACY_EXTENSION);
@@ -588,6 +601,7 @@ function doctorReport(cwd: string): string {
     `Screenshot evidence (last session_stop): ${evidenceByCwd.get(cwd) ?? "not measured yet"}`,
     `Run skill (project): ${projectRunSkill(cwd) ?? "none"}`,
     `Driver: ${existsSync(join(SCRIPTS_ROOT, "designer-driver.mjs")) ? "present" : "missing"}`,
+    `Canvas: ${describeCanvas(cwd)}`,
     describeFlags(resolveFlags({ cwd })),
     "",
     ...skills,
@@ -1187,6 +1201,24 @@ export default function designerExtension(pi: ExtensionAPI): void {
         ctx.ui?.notify?.(vibes[cwd] ? `Current vibe: ${vibes[cwd]}` : "No vibe set. Usage: /designer-vibe <preferences> | clear", "info");
       }
       ctx.editor?.setText?.("");
+    },
+  });
+
+  pi.registerCommand("designer-canvas", {
+    description: "Rebuild the project design canvas (every board and capture on one page) and report its path",
+    aliases: ["design-canvas"],
+    handler: (_args, ctx) => {
+      const cwd = ctx.cwd ?? process.cwd();
+      try {
+        const written = writeCanvasFiles(cwd);
+        writeTrace(cwd, "canvas_built", { boards: written.boards, path: written.htmlPath });
+        ctx.ui?.notify?.(`Canvas: ${written.boards} board${written.boards === 1 ? "" : "s"} -> ${written.htmlPath}`, "info");
+        ctx.editor?.setText?.(written.htmlPath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        writeTrace(cwd, "canvas_failed", { error: message });
+        ctx.ui?.notify?.(`Canvas failed: ${message}`, "error");
+      }
     },
   });
 

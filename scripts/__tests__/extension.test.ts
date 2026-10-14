@@ -35,7 +35,7 @@ afterAll(() => {
 describe("v5 extension", () => {
   test("registers once without a tool gate", () => {
     module.default(api);
-    expect(commands.map((command) => command.name)).toEqual(["designer", "designer-vibe", "designer-doctor"]);
+    expect(commands.map((command) => command.name)).toEqual(["designer", "designer-vibe", "designer-canvas", "designer-doctor"]);
     expect(handlers.has("tool_call")).toBe(false);
     expect(handlers.has("tool_result")).toBe(false);
   });

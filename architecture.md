@@ -158,6 +158,15 @@ writes a report saying so and exits 2, because a page that was never rendered is
 not evidence. `shared/driver-report.mjs` holds the report contract — a report
 that is missing, truncated, or malformed reads as no evidence, never as success.
 
+`scripts/designer-canvas.mjs` (and the `/designer-canvas` command) assembles the
+canvas: authored `project/*.dc.html` boards plus the driver's captures, laid out
+on one deterministic grid with an index in claude-code's shape
+(`canvas.json` with `boards` + `order`), written as `designer-canvas.html` in the
+project. The driver rebuilds it after every run, so the sheet always matches the
+freshest captures — including a failed run, where seeing the broken board is the
+point. A board name is escaped in both the markup and the embedded index, because
+a filename is not trusted input.
+
 The stop-time evidence record reads that report, so the record can say
 `driver: ok (2 captures, 0 console errors)` rather than only counting captures,
 and `/designer-doctor` prints the project's run skill and whether the driver is

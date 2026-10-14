@@ -125,7 +125,7 @@ omp.default(host.api as never);
 
 describe("P2: OMP hook registration", () => {
   test("registers the documented commands and hooks, and no tool gate", () => {
-    expect(host.commands).toEqual(["designer", "designer-vibe", "designer-doctor"]);
+    expect(host.commands).toEqual(["designer", "designer-vibe", "designer-canvas", "designer-doctor"]);
     expect(host.handlers.has("before_agent_start")).toBe(true);
     expect(host.handlers.has("resources_discover")).toBe(true);
     expect(host.handlers.has("session_stop")).toBe(true);

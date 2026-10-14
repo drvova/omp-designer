@@ -147,6 +147,7 @@ detection, and one bounded plan-only continuation. They are not at parity:
 | Bounded taste review (slop rules, blank screenshot bands, screenshot-evidence record, optional visual reviewer) | yes | no |
 | Contract assembled per turn (four flag-gated fragments: motion, dataviz, forms, verify) | yes | no |
 | Browser driver (`designer-driver.mjs`: 1440 + 375 captures, console errors, driver report) | yes | no |
+| Design canvas (`designer-canvas.html`: boards + captures on one page, cc-shaped `canvas.json`) | yes | no |
 | Trace events under `~/.omp/agent/designer-traces` | yes | no |
 | Tool interception / skill-read hard gate | none | none |
 | MCP mutation | none | none |
@@ -323,6 +324,7 @@ extensions/designer.ts           Pi extension (prompt + plan checks, no backstop
 shared/security.mjs              shared secret patterns for redaction and release scan
 skills/                          seven skills (incl. run + run-skill-generator)
 scripts/designer-driver.mjs      browser driver: captures, console errors, driver-report.json
+scripts/designer-canvas.mjs      canvas: every board and capture on one page (+ canvas.json)
 scripts/check-plugin-link.mjs    proves the installed plugin is this checkout, not the npm copy
 data/ui-ux-pro-max/              palette and typography search data
 scripts/fix-ai-slop.mjs          evidence-aware copy validator

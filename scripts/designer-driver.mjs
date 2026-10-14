@@ -28,6 +28,7 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
+import { writeCanvasFiles } from "../shared/design-canvas.mjs";
 import {
   DRIVER_EXIT,
   DRIVER_REPORT_FILE,
@@ -41,7 +42,7 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FLAGS_WITH_VALUES = new Set([
   "--start", "--url", "--out", "--settle", "--project", "--playwright", "--channel", "--timeout",
 ]);
-const FLAGS_BOOLEAN = new Set(["--headed", "--keep", "--help", "-h"]);
+const FLAGS_BOOLEAN = new Set(["--headed", "--keep", "--no-canvas", "--help", "-h"]);
 
 function parseArgs(argv) {
   const options = {
@@ -55,6 +56,7 @@ function parseArgs(argv) {
     timeout: 30_000,
     headed: false,
     keep: false,
+    "no-canvas": false,
     help: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -185,12 +187,23 @@ function baseReport(options) {
   };
 }
 
-function finish(outDir, report, code) {
+function finish(outDir, report, code, options) {
   const path = writeReport(outDir, report);
   console.log(`designer-driver: ${summarizeDriver(report)}`);
   console.log(`report: ${path}`);
   if (report.error) console.log(`error: ${report.error}`);
   for (const capture of report.captures) console.log(`capture: ${capture.path}${capture.blank ? " (blank)" : ""}`);
+  // The canvas is the "look at all of it at once" surface; it is written on
+  // every run (including failures, where seeing the broken board is the point)
+  // so the sheet always matches the freshest captures.
+  if (!options["no-canvas"] && existsSync(join(options.project, "screenshots"))) {
+    try {
+      const written = writeCanvasFiles(resolve(options.project));
+      console.log(`canvas: ${written.htmlPath} (${written.boards} board${written.boards === 1 ? "" : "s"})`);
+    } catch (error) {
+      console.log(`canvas: not written (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
   return code;
 }
 
@@ -220,7 +233,7 @@ async function main() {
   if (!playwright) {
     report.reason = "playwright-unavailable";
     report.error = `playwright-core not found (looked in ${projectRoot}/node_modules and ${PACKAGE_ROOT}/node_modules)`;
-    return finish(outDir, report, DRIVER_EXIT.unusable);
+    return finish(outDir, report, DRIVER_EXIT.unusable, options);
   }
 
   let chromium;
@@ -231,7 +244,7 @@ async function main() {
   } catch (error) {
     report.reason = "playwright-unavailable";
     report.error = error instanceof Error ? error.message : String(error);
-    return finish(outDir, report, DRIVER_EXIT.unusable);
+    return finish(outDir, report, DRIVER_EXIT.unusable, options);
   }
 
   const server = options.start ? startServer(options.start, projectRoot) : null;
@@ -241,7 +254,7 @@ async function main() {
     if (!reachable) {
       report.reason = "url-unreachable";
       report.error = `${options.url} did not answer within ${options.timeout}ms${options.start ? ` (started with: ${options.start})` : ""}`;
-      return finish(outDir, report, DRIVER_EXIT.failed);
+      return finish(outDir, report, DRIVER_EXIT.failed, options);
     }
 
     let launched;
@@ -250,7 +263,7 @@ async function main() {
     } catch (error) {
       report.reason = "launch-failed";
       report.error = error instanceof Error ? error.message : String(error);
-      return finish(outDir, report, DRIVER_EXIT.failed);
+      return finish(outDir, report, DRIVER_EXIT.failed, options);
     }
     browser = launched.browser;
 
@@ -271,7 +284,7 @@ async function main() {
     } catch (error) {
       report.reason = "url-unreachable";
       report.error = error instanceof Error ? error.message : String(error);
-      return finish(outDir, report, DRIVER_EXIT.failed);
+      return finish(outDir, report, DRIVER_EXIT.failed, options);
     }
 
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
@@ -298,16 +311,16 @@ async function main() {
     if (blanks.length > 0) {
       report.reason = "blank-capture";
       report.error = `${blanks.length} of ${report.captures.length} captures are mostly blank: content is hidden at initial paint, or the app did not render`;
-      return finish(outDir, report, DRIVER_EXIT.failed);
+      return finish(outDir, report, DRIVER_EXIT.failed, options);
     }
 
     report.ok = true;
     report.reason = "ok";
-    return finish(outDir, report, DRIVER_EXIT.ok);
+    return finish(outDir, report, DRIVER_EXIT.ok, options);
   } catch (error) {
     report.reason = "driver-error";
     report.error = error instanceof Error ? error.message : String(error);
-    return finish(outDir, report, DRIVER_EXIT.failed);
+    return finish(outDir, report, DRIVER_EXIT.failed, options);
   } finally {
     try {
       await browser?.close();

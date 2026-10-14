@@ -20,6 +20,7 @@ const requiredFiles = [
   "scripts/audit-data.mjs",
   "scripts/check-plugin-link.mjs",
   "scripts/designer-driver.mjs",
+  "scripts/designer-canvas.mjs",
   "scripts/real-agent-eval.mjs",
   "scripts/install-local.mjs",
   "scripts/lifecycle-cli.mjs",
