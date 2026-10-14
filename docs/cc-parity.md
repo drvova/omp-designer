@@ -19,7 +19,7 @@ because the difference is the host, not the idea.
 | Skills listed in full when bundled | `skill_listing` attachment; `source === "bundled"` is exempt from the listing character budget | all 8 listed with full descriptions | **match at our scale** (no budget pressure with 8 files) |
 | A live design canvas | `canvas.json` v3 keys (`boards`, `order`, `pages`, `designSystems`, `createdOnFiles`, `launch`), boards as `*.dc.html`, `AppifactRepl` (`files.list/read/readMany/publish`), `board.mjs` renderer (87KB) | `canvas.json` (`boards`, `order`, `cell`) + `designer-canvas.html`, rebuilt by the driver | **partial** — same index idea and one-page surface, but ours is a generated sheet, not a live in-app canvas with per-board publishing |
 | Publish protocol with surgical retry | "If a call reports an error, fix the line it names and send THAT call again, not the others"; a refused publish re-runs from line one, once | driver exits non-zero with a report; repair turns are bounded (2 validation, 3 taste) | **partial** — our retry granularity is the turn, not the call |
-| Verification attached to the tool | `ArtifactCheck` (`Artifact`/`ArtifactComments`/`ArtifactData`/`ArtifactCheck`; `verify` and `preview` map to it) renders desktop **and phone** in **light and dark** and lists overflow, colors that ignore the theme, blocked loads, console errors including a script that fails to parse | `designer-driver.mjs`: 1440 + 375 captures, console/page/request errors, blank rule calibrated on measured pages; `screenshot_evidence` + `claimFindings` at `session_stop` | **partial** — same widths and console coverage; we do **not** yet report overflow or theme-ignoring colors, and diagnostics arrive at stop time rather than in the tool result |
+| Verification attached to the tool | `ArtifactCheck` (`Artifact`/`ArtifactComments`/`ArtifactData`/`ArtifactCheck`; `verify` and `preview` map to it) renders desktop **and phone** in **light and dark** and lists overflow, colors that ignore the theme, blocked loads, console errors including a script that fails to parse | `designer-driver.mjs` at 1440 + 375: console/page/request errors, blank rule calibrated on measured pages, **horizontal overflow past the viewport**, and **rendered text contrast below 3:1** measured on the live DOM per width; `screenshot_evidence` + `claimFindings` at `session_stop` | **partial** — coverage matches on widths, console, overflow and contrast; the remaining differences are dark-mode-specific reporting and the fact that our diagnostics arrive at stop time rather than inside the tool result |
 | "Write, check once, publish" | one preview, one pass of edits, no second look; optional except for charts of real numbers | delivery checks + taste review + one bounded repair | **match** (spirit) |
 | Design plan as a token block in the file | `:root` with 4-6 named colors, 2+ type roles, a layout comment; derive everything from it, don't narrate hexes | added to `designer-master` §5 "Tokens, themes, and neutrals" | **match** (doctrine) |
 | Three theme states | bare `:root` = light; `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])` redefines tokens; `:root[data-theme="dark"]` for an explicit choice | same pattern, ported | **match** |
@@ -56,10 +56,12 @@ feature:
 1. **Phase 4 — grade it.** Extend `real-agent-eval.mjs` with graders matching cc's
    `plugin eval`: did the session run the driver, produce captures after the last
    source edit, and avoid a claim its record contradicts.
-2. **Close the diagnostic gap that needs no host**: teach `designer-driver.mjs` to
-   report horizontal overflow at 375px and colors that ignore the theme (a
-   value-luminance check against the page background), which is exactly what
-   `ArtifactCheck` covers and what our record currently cannot.
+2. ~~Close the diagnostic gap that needs no host~~ — **done**: the driver now
+   measures horizontal overflow past the viewport and rendered text contrast on the
+   live DOM at each width, prints them, and the summary carries them
+   (`ok (2 captures, 0 console errors, 3 layout warnings)`). Still missing from
+   `ArtifactCheck`'s list: a dark-mode pass and blocked-load attribution beyond
+   request failures.
 3. **Artifact-type analogues, deliberately scoped.** `artifact-explainer`,
    `artifact-report`, `artifact-data-table`, `artifact-diagramming` are *publishable
    artifact types* in cc. Locally the deliverable is a real page or route, so if we

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DRIVER_REPORT_FILE,
+  driverWarnings,
   isBlankCapture,
   DRIVER_VIEWPORTS,
   normalizeDriverReport,
@@ -114,6 +115,30 @@ ok("a missing or corrupt report file is no evidence, not a pass", () => {
   mkdirSync(join(corrupt, "screenshots"), { recursive: true });
   writeFileSync(join(corrupt, "screenshots", DRIVER_REPORT_FILE), "{ half-written");
   assert.equal(readDriverReport(corrupt), null);
+});
+
+ok("layout warnings are carried, capped, and never flip the verdict", () => {
+  const report = normalizeDriverReport({
+    ...goodReport,
+    diagnostics: {
+      "375": {
+        overflowing: [
+          { element: "div.past", right: 948, width: 900 },
+          { element: "junk" },
+          ...Array.from({ length: 6 }, (_, index) => ({ element: `span.${index}`, right: 400, width: 120 })),
+        ],
+        lowContrast: [{ text: "pale line", element: "p", ratio: 1.54, color: "rgb(207, 201, 192)", background: "rgb(250, 247, 242)" }],
+      },
+      "1440": { overflowing: [], lowContrast: [] },
+    },
+  });
+  assert.equal(report?.ok, true, "warnings are warnings");
+  assert.equal(report?.diagnostics["375"].overflowing.length, 5, "capped at five");
+  assert.deepEqual(report?.diagnostics["375"].overflowing[0], { element: "div.past", right: 948, width: 900 });
+  assert.equal(driverWarnings(report), 6, "five overflowing plus one low-contrast");
+  assert.equal(summarizeDriver(report), "ok (2 captures, 0 console errors, 6 layout warnings)");
+  assert.equal(driverWarnings(normalizeDriverReport(goodReport)), 0);
+  assert.equal(summarizeDriver(normalizeDriverReport(goodReport)), "ok (2 captures, 0 console errors)", "a clean run keeps the short line");
 });
 
 ok("the blank rule is calibrated on measured pages, not guesses", () => {

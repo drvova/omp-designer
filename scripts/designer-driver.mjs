@@ -180,6 +180,7 @@ function baseReport(options) {
     settleMs: options.settle,
     viewports: [...DRIVER_VIEWPORTS],
     captures: [],
+    diagnostics: {},
     consoleErrors: [],
     pageErrors: [],
     failedRequests: [],
@@ -288,10 +289,75 @@ async function main() {
     }
 
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    const diagnostics = {};
+
     for (const width of DRIVER_VIEWPORTS) {
       await page.setViewportSize({ width, height: Math.max(640, Math.round(width * 0.72)) });
       await page.evaluate(() => (globalThis.document?.fonts?.ready ?? Promise.resolve()).then(() => undefined)).catch(() => undefined);
       await page.waitForTimeout(options.settle);
+      // What a preview surface owes the writer: the two defects that are invisible
+      // in a screenshot — content wider than the viewport, and text that cannot be
+      // read against the background it actually sits on. Measured on the live DOM
+      // at each width, in the browser's own resolved colors.
+      diagnostics[String(width)] = await page.evaluate(() => {
+        const viewport = document.documentElement.clientWidth;
+        const overflowing = [];
+        if (document.documentElement.scrollWidth - viewport > 1) {
+          for (const element of document.querySelectorAll("body *")) {
+            const box = element.getBoundingClientRect();
+            if (box.width > 0 && box.right > viewport + 1) {
+              const hint = element.id
+                ? "#" + element.id
+                : element.className && typeof element.className === "string"
+                  ? element.tagName.toLowerCase() + "." + element.className.trim().split(/\s+/).slice(0, 2).join(".")
+                  : element.tagName.toLowerCase();
+              overflowing.push({ element: hint, right: Math.round(box.right), width: Math.round(box.width) });
+              if (overflowing.length >= 5) break;
+            }
+          }
+        }
+        const parse = (value) => {
+          const match = /rgba?\(([^)]+)\)/.exec(value || "");
+          if (!match) return null;
+          const parts = match[1].split(",").map((part) => Number.parseFloat(part));
+          return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+        };
+        const channel = (value) => {
+          const scaled = value / 255;
+          return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4;
+        };
+        const luminance = (color) => 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
+        const lowContrast = [];
+        for (const element of document.querySelectorAll("body *")) {
+          const text = (element.textContent || "").trim();
+          if (!text || element.children.length > 0 || element.offsetParent === null) continue;
+          const style = getComputedStyle(element);
+          if (Number.parseFloat(style.opacity) < 0.9 || style.visibility === "hidden") continue;
+          const foreground = parse(style.color);
+          if (!foreground || foreground.a < 0.99) continue;
+          let background = null;
+          for (let node = element; node && !background; node = node.parentElement) {
+            const candidate = parse(getComputedStyle(node).backgroundColor);
+            if (candidate && candidate.a > 0.99) background = candidate;
+          }
+          if (!background) continue;
+          const lighter = Math.max(luminance(foreground), luminance(background));
+          const darker = Math.min(luminance(foreground), luminance(background));
+          const ratio = (lighter + 0.05) / (darker + 0.05);
+          if (ratio < 3) {
+            lowContrast.push({
+              text: text.slice(0, 60),
+              element: element.tagName.toLowerCase(),
+              ratio: Math.round(ratio * 100) / 100,
+              color: style.color,
+              background: "rgb(" + background.r + ", " + background.g + ", " + background.b + ")",
+            });
+            if (lowContrast.length >= 5) break;
+          }
+        }
+        return { width: viewport, overflowing, lowContrast };
+      });
+
       const file = join(outDir, `${width >= 1000 ? "desktop" : "mobile"}-${width}.png`);
       await page.screenshot({ path: file, fullPage: true });
       const analysis = analyzeScreenshot(file);
@@ -307,13 +373,24 @@ async function main() {
       });
     }
 
-    const blanks = report.captures.filter((capture) => capture.blank);
+      const overflowFindings = Object.values(diagnostics).reduce((sum, entry) => sum + entry.overflowing.length, 0);
+    const contrastFindings = Object.values(diagnostics).reduce((sum, entry) => sum + entry.lowContrast.length, 0);
+    if (overflowFindings + contrastFindings > 0) {
+      console.log(`layout warnings: ${overflowFindings} overflowing, ${contrastFindings} low-contrast`);
+      for (const [width, entry] of Object.entries(diagnostics)) {
+        for (const item of entry.overflowing) console.log(`  ${width}px: ${item.element} runs ${item.right - entry.width}px past the edge`);
+        for (const item of entry.lowContrast) console.log(`  ${width}px: "${item.text}" is ${item.ratio}:1 on ${item.background}`);
+      }
+    }
+
+  const blanks = report.captures.filter((capture) => capture.blank);
     if (blanks.length > 0) {
       report.reason = "blank-capture";
       report.error = `${blanks.length} of ${report.captures.length} captures are mostly blank: content is hidden at initial paint, or the app did not render`;
       return finish(outDir, report, DRIVER_EXIT.failed, options);
     }
 
+    report.diagnostics = diagnostics;
     report.ok = true;
     report.reason = "ok";
     return finish(outDir, report, DRIVER_EXIT.ok, options);

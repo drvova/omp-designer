@@ -83,11 +83,67 @@ export function normalizeDriverReport(value) {
       ? record.viewports.filter((width) => typeof width === "number")
       : [],
     captures,
+    diagnostics: normalizeDiagnostics(record.diagnostics),
     consoleErrors: strings(record.consoleErrors),
     pageErrors: strings(record.pageErrors),
     failedRequests: strings(record.failedRequests),
     error: typeof record.error === "string" ? record.error : null,
   };
+}
+
+const DIAGNOSTIC_LIMIT = 5;
+
+/**
+ * Overflow and low-contrast findings, keyed by viewport width. These are warnings
+ * (the page rendered), so they never flip `ok`; they exist so the record can say
+ * "it rendered, and the phone width has content 42px past the edge".
+ */
+function normalizeDiagnostics(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out = {};
+  for (const [width, entry] of Object.entries(value)) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = /** @type {Record<string, unknown>} */ (entry);
+    const overflowing = Array.isArray(record.overflowing)
+      ? record.overflowing
+          .filter((item) => item && typeof item === "object")
+          .slice(0, DIAGNOSTIC_LIMIT)
+          .map((item) => {
+            const row = /** @type {Record<string, unknown>} */ (item);
+            return {
+              element: typeof row.element === "string" ? row.element : "unknown",
+              right: typeof row.right === "number" ? row.right : 0,
+              width: typeof row.width === "number" ? row.width : 0,
+            };
+          })
+      : [];
+    const lowContrast = Array.isArray(record.lowContrast)
+      ? record.lowContrast
+          .filter((item) => item && typeof item === "object")
+          .slice(0, DIAGNOSTIC_LIMIT)
+          .map((item) => {
+            const row = /** @type {Record<string, unknown>} */ (item);
+            return {
+              text: typeof row.text === "string" ? row.text : "",
+              element: typeof row.element === "string" ? row.element : "unknown",
+              ratio: typeof row.ratio === "number" ? row.ratio : 0,
+              color: typeof row.color === "string" ? row.color : "",
+              background: typeof row.background === "string" ? row.background : "",
+            };
+          })
+      : [];
+    out[String(width)] = { overflowing, lowContrast };
+  }
+  return out;
+}
+
+/** How many layout warnings the run carries, across every width. */
+export function driverWarnings(report) {
+  let count = 0;
+  for (const entry of Object.values(report?.diagnostics ?? {})) {
+    count += (entry?.overflowing?.length ?? 0) + (entry?.lowContrast?.length ?? 0);
+  }
+  return count;
 }
 
 /**
@@ -144,7 +200,9 @@ export function summarizeDriver(report) {
   const problems = report.consoleErrors.length + report.pageErrors.length + report.failedRequests.length;
   const blanks = report.captures.filter((capture) => capture.blank).length;
   if (report.ok) {
-    return `ok (${captures} capture${captures === 1 ? "" : "s"}, ${problems} console error${problems === 1 ? "" : "s"})`;
+    const warnings = driverWarnings(report);
+    const warningClause = warnings > 0 ? `, ${warnings} layout warning${warnings === 1 ? "" : "s"}` : "";
+    return `ok (${captures} capture${captures === 1 ? "" : "s"}, ${problems} console error${problems === 1 ? "" : "s"}${warningClause})`;
   }
   const why = report.error ? `${report.reason}: ${report.error}` : report.reason;
   const detail = blanks > 0 ? `${blanks} blank capture${blanks === 1 ? "" : "s"}` : `${captures} capture${captures === 1 ? "" : "s"}`;

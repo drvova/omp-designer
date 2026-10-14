@@ -152,7 +152,11 @@ being rediscovered.
 `scripts/designer-driver.mjs` is the driver for web and static work: it starts or
 attaches to the app, captures a full page at 1440 and 375, collects console
 errors, page errors and failed requests, writes `screenshots/driver-report.json`,
-and exits non-zero when the app never answered or a capture is blank. Playwright
+and exits non-zero when the app never answered or a capture is blank. It also
+measures, per width, what a screenshot cannot show: content wider than the
+viewport, and text whose rendered contrast against its actual background falls
+below 3:1. Those are warnings in the summary (`ok (2 captures, 0 console errors,
+3 layout warnings)`), never a flipped verdict — the page did render. Playwright
 is resolved from the project (or `--playwright` / `DESIGNER_PLAYWRIGHT`) and is
 deliberately not a dependency of this package; when it is absent the driver
 writes a report saying so and exits 2, because a page that was never rendered is
