@@ -515,6 +515,29 @@ describe("P2: duplicate load and loader realms", () => {
   });
 });
 
+describe("P2: instance lock ownership", () => {
+  // The lock name carries the PID and Windows recycles PIDs, so a file left by a
+  // dead process used to make the next process holding that PID answer "already
+  // registered" and register nothing at all — the extension silently inert for a
+  // whole session. These two arms are that bug and its intended behaviour.
+  const lockPath = join(tmpdir(), `omp-designer-v5-${process.pid}.lock`);
+
+  test("debris from a recycled PID is taken over, not obeyed", () => {
+    const mine = readFileSync(lockPath, "utf8");
+    try {
+      writeFileSync(lockPath, "424242:1");
+      expect(omp.claimInstanceLock()).toBe(true);
+      expect(readFileSync(lockPath, "utf8")).toContain(`${process.pid}:`);
+    } finally {
+      writeFileSync(lockPath, mine);
+    }
+  });
+
+  test("this process's own lock is still respected", () => {
+    expect(omp.claimInstanceLock()).toBe(false);
+  });
+});
+
 describe("P2: OMP vs Pi capability difference", () => {
   test("Pi registers the same commands/hooks but has no delivery-check backstop", () => {
     const piHost = makeHost();

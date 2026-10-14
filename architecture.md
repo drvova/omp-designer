@@ -161,6 +161,18 @@ warnings unless they produce an objective accessibility failure.
 `audit-data.mjs` validates CSV structure and contrast centrally so malformed
 reference rows fail package tests.
 
+`shared/delivery-claims.mjs` compares the claims a session's final message makes
+about its own verification against these recorded facts, because the delivery
+checks verify the project and never the sentence shipped with it. Two rules:
+`claim-contradicts-check` when the summary says something passed and the record
+shows it failed, and `claim-unverified-evidence` when the summary claims a look
+at rendered output the record cannot support, or a passing build for a project
+where nothing of the kind was measured. Findings ride the same bounded repair
+turn as the taste review, in their own block. Precision is deliberate: a negated
+sentence is a disclaimer rather than a claim, and an absence with nothing to
+compare against is left alone, because a check that punishes honest reporting has
+already failed.
+
 At every frontend `session_stop` the trace also records `screenshot_evidence`:
 how many captures exist, how many predate the newest source edit, and a state of
 `fresh`, `stale`, `missing`, or `none`. A capture that does not exist cannot be

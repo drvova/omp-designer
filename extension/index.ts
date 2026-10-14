@@ -30,6 +30,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactSecrets } from "../shared/security.mjs";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
+import { claimFindings } from "../shared/delivery-claims.mjs";
 import { collectSkillUsage } from "../shared/skill-usage.mjs";
 import { resolveFlags, describeFlags } from "../shared/designer-flags.mjs";
 
@@ -52,6 +53,65 @@ const GLOBAL_STATE_KEY = "*";
 const INSTANCE_SYMBOL = Symbol.for("omp-designer.v5.registered");
 const INSTANCE_ENV = "OMP_DESIGNER_V5_REGISTERED_PID";
 const INSTANCE_LOCK = join(tmpdir(), `omp-designer-v5-${process.pid}.lock`);
+/**
+ * Identity of the process that owns the lock file.
+ *
+ * Windows recycles PIDs and the lock name carries the PID, so a file left behind
+ * by a dead process made the next process to hold that PID answer "another realm
+ * already registered" and return before registering a single hook: the whole
+ * extension went silently inert for that session, with no error and no trace
+ * line. Recording the owner's PID and process start time makes the check exact —
+ * only an identical pair means another realm of THIS process owns the lock.
+ */
+const INSTANCE_START_MS = Math.round(Date.now() - process.uptime() * 1000);
+const INSTANCE_OWNER = `${process.pid}:${INSTANCE_START_MS}`;
+/**
+ * Two realms of one process estimate that start time milliseconds apart, so the
+ * comparison carries a tolerance. A PID recycled by a *later* process differs by
+ * far more than this, which is the case the tolerance has to keep apart.
+ */
+const INSTANCE_OWNER_TOLERANCE_MS = 2000;
+
+/** True only when the lock file records this very process. */
+function lockHeldByThisProcess(raw: string): boolean {
+  const [pidText, startText] = raw.trim().split(":");
+  if (Number(pidText) !== process.pid) return false;
+  const recorded = Number(startText);
+  if (!Number.isFinite(recorded)) return false;
+  return Math.abs(recorded - INSTANCE_START_MS) <= INSTANCE_OWNER_TOLERANCE_MS;
+}
+
+/**
+ * Claim the cross-realm lock. False means another realm of this same process
+ * already registered; debris from a recycled PID is taken over instead, because
+ * answering "already registered" to a dead process's leftovers disables the
+ * extension without saying so. JavaScript runs one thread, so this read-then-
+ * takeover cannot interleave with another realm's own claim.
+ */
+function claimInstanceLock(): boolean {
+  try {
+    closeSync(openSync(INSTANCE_LOCK, "wx", 0o600));
+  } catch (error) {
+    if (asRecord(error).code !== "EEXIST") return true; // no lock available: the in-memory guards stand
+    try {
+      if (lockHeldByThisProcess(readFileSync(INSTANCE_LOCK, "utf8"))) return false;
+    } catch {
+      return true; // unreadable debris is not evidence of a live realm
+    }
+    try {
+      writeFileSync(INSTANCE_LOCK, INSTANCE_OWNER, { mode: 0o600 });
+    } catch {
+      // The takeover failed; the two in-memory guards still stand.
+    }
+    return true;
+  }
+  try {
+    writeFileSync(INSTANCE_LOCK, INSTANCE_OWNER, { mode: 0o600 });
+  } catch {
+    // Content is advisory; owning the file is what the guard needs.
+  }
+  return true;
+}
 
 // Last measured skill-usage line per working directory. Module scope because the
 // doctor command reads it from outside the registration closure; keys are working
@@ -1022,22 +1082,16 @@ export default function designerExtension(pi: ExtensionAPI): void {
   const registry = globalThis as Record<symbol, unknown>;
   if (registry[INSTANCE_SYMBOL]) return;
 
-  // Bun loader realms can isolate both globalThis and process.env. An exclusive
-  // process-scoped file is the final atomic guard across those realms.
-  try {
-    const descriptor = openSync(INSTANCE_LOCK, "wx", 0o600);
-    closeSync(descriptor);
-    process.once("exit", () => {
-      try {
-        unlinkSync(INSTANCE_LOCK);
-      } catch {
-        // The process is exiting; stale cleanup cannot affect the session.
-      }
-    });
-  } catch (error) {
-    if (asRecord(error).code === "EEXIST") return;
-    // If a platform cannot provide the lock, keep the two in-memory guards.
-  }
+  // Bun loader realms can isolate both globalThis and process.env. A
+  // process-scoped file is the final guard across those realms.
+  if (!claimInstanceLock()) return;
+  process.once("exit", () => {
+    try {
+      unlinkSync(INSTANCE_LOCK);
+    } catch {
+      // The process is exiting; stale cleanup cannot affect the session.
+    }
+  });
 
   registry[INSTANCE_SYMBOL] = { module: MODULE_FILE, registeredAt: new Date().toISOString() };
 
@@ -1227,50 +1281,80 @@ export default function designerExtension(pi: ExtensionAPI): void {
         .map((check) => `${check.name}: ${check.skipped ?? "not measured"}`),
     });
 
+    // Both the rendered-evidence record and the claim check belong to the whole
+    // stop, not to one branch: they are recorded even when delivery failed. The
+    // claim check compares the summary's own words against these recorded facts,
+    // which is the only honesty check available for a project the harness does
+    // not own.
+    const review = tasteReview(cwd, userFactsByCwd.get(cwd) ?? "", sessionStart);
+    recordScreenshotEvidence(cwd, sessionId, review.evidence);
+    const buildCheck = checks.find((check) => check.name === "build");
+    const buildOk = !buildCheck || buildCheck.skipped ? null : buildCheck.ok;
+    const claimItems = claimFindings({
+      message: messageText(eventRecord.last_assistant_message),
+      evidence: review.evidence,
+      buildOk,
+    });
+    writeTrace(cwd, claimItems.length === 0 ? "claim_check_passed" : "claim_mismatch", {
+      sessionId,
+      rules: claimItems.map((claim) => claim.rule),
+    });
+
     if (failures.length === 0) {
       validationAttempts.delete(sessionId);
 
       // Delivery is objectively fine; now look for default-AI aesthetics.
       // Taste never blocks, but detected slop earns one self-repair pass.
-      const review = tasteReview(cwd, userFactsByCwd.get(cwd) ?? "", sessionStart);
-      const tasteItems = review.items;
-      recordScreenshotEvidence(cwd, sessionId, review.evidence);
-      writeTrace(cwd, tasteItems.length === 0 ? "taste_review_passed" : "taste_review_flagged", {
+      writeTrace(cwd, review.items.length === 0 ? "taste_review_passed" : "taste_review_flagged", {
         sessionId,
-        rules: tasteItems.map((item) => item.rule),
+        rules: review.items.map((item) => item.rule),
       });
-      if (tasteItems.length === 0) {
+      if (review.items.length === 0 && claimItems.length === 0) {
         tasteRepairAttempts.delete(sessionId);
         return;
       }
       // Two bounded repair passes: real runs show the flagged set shrinking
-      // per pass (4 rules -> 2 rules), so a second pass usually clears it.
+      // per pass (4 rules -> 2 rules), so a second pass usually clears it. Claim
+      // findings share the counter: same kind of turn, same bound.
       const tasteAttempt = (tasteRepairAttempts.get(sessionId) ?? 0) + 1;
       tasteRepairAttempts.set(sessionId, tasteAttempt);
       if (tasteAttempt >= 3) return;
-      return {
-        continue: true,
-        additionalContext: truncate([
+
+      // The two findings stay in separate blocks: a claim finding is an honesty
+      // problem, not an aesthetic one, and reporting it under the slop heading
+      // would misdirect the repair.
+      const blocks: string[] = [];
+      if (claimItems.length > 0) {
+        blocks.push([
+          "[DESIGNER CLAIM CHECK]",
+          "The summary claims a verification the record does not support. Do the work or correct the sentence; do not restate it as done.",
+          "",
+          ...claimItems.map((item) => `- ${item.rule}: ${item.detail}`),
+          "[/DESIGNER CLAIM CHECK]",
+        ].join("\n"));
+      }
+      if (review.items.length > 0) {
+        blocks.push([
           "[DESIGNER TASTE REVIEW]",
           "Delivery checks passed, but the result shows statistical-default (AI slop) patterns. Fix the underlying causes below without changing the user's scope, rerun the checks, and recapture affected screenshots.",
           "",
-          ...tasteItems.map((item) => `- ${item.rule}: ${item.detail}`),
+          ...review.items.map((item) => `- ${item.rule}: ${item.detail}`),
           "",
           "Escape defaults with product specificity (a real product view, honest diagram, or material-derived palette) — not with added decoration.",
           "[/DESIGNER TASTE REVIEW]",
-        ].join("\n")),
-      };
+        ].join("\n"));
+      }
+      return { continue: true, additionalContext: truncate(blocks.join("\n\n")) };
     }
 
     // One continuation gives the agent a chance to repair. The second failure
     // is reported by the normal assistant response instead of creating a loop.
     if (attempt >= 2) return;
 
-    // Piggyback taste findings on the same repair turn: a session that ends in
-    // delivery failure would otherwise ship with its taste problems unreviewed.
-    const failureReview = tasteReview(cwd, userFactsByCwd.get(cwd) ?? "", sessionStart);
-    const failureTasteItems = failureReview.items;
-    recordScreenshotEvidence(cwd, sessionId, failureReview.evidence);
+    // Piggyback the taste and claim findings on the same repair turn: a session
+    // that ends in delivery failure would otherwise ship with its taste problems
+    // and its unsupported claims unreviewed.
+    const failureTasteItems = review.items;
     return {
       continue: true,
       additionalContext: truncate([
@@ -1281,6 +1365,9 @@ export default function designerExtension(pi: ExtensionAPI): void {
         "If visible output changes, repeat browser QA and refresh affected screenshots.",
         "",
         ...failures.map((failure) => `## ${failure.name}\n${failure.output || "failed without output"}`),
+        ...(claimItems.length > 0
+          ? ["", "## claim check (correct the sentence or do the work)", ...claimItems.map((item) => `- ${item.rule}: ${item.detail}`)]
+          : []),
         ...(failureTasteItems.length > 0
           ? ["", "## taste review (fix in the same pass)", ...failureTasteItems.map((item) => `- ${item.rule}: ${item.detail}`)]
           : []),
@@ -1293,6 +1380,7 @@ export default function designerExtension(pi: ExtensionAPI): void {
 export {
   CONTRACT_FRAGMENTS,
   checkStatus,
+  claimInstanceLock,
   DATA_ROOT,
   buildContract,
   fragmentNamesFor,

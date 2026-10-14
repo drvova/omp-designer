@@ -76,7 +76,7 @@
     "test:cleanup": "node scripts/__tests__/cleanup-artifacts.test.mjs",
     "cleanup:artifacts": "node scripts/cleanup-artifacts.mjs",
     "test:security": "node scripts/__tests__/security.test.mjs",
-    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
+    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:claims && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
     "e2e:smoke": "bun scripts/e2e-smoke.mjs",
     "test:real": "node scripts/real-agent-eval.mjs",
     "test:real:suite": "node scripts/real-agent-eval.mjs --suite",
@@ -90,7 +90,8 @@
     "install:local:clean": "node scripts/install-local.mjs --apply --clean",
     "check:release": "node scripts/check-release.mjs",
     "prepublishOnly": "npm test && npm run check:release",
-    "test:contract": "bun test scripts/__tests__/contract-assembly.test.ts"
+    "test:contract": "bun test scripts/__tests__/contract-assembly.test.ts",
+    "test:claims": "node scripts/__tests__/delivery-claims.test.mjs"
   },
   "engines": {
     "node": ">=20.19.0"
