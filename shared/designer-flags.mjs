@@ -8,9 +8,14 @@
  * variable, read once per turn at prompt-assembly time.
  *
  * Precedence, highest first:
- *   1. `OMP_DESIGNER_FLAGS` — a JSON object in the environment (session/shell wide)
- *   2. `.omp/designer-flags.json` in the working directory (project wide)
- *   3. the defaults below (always enabled, so behaviour is unchanged by default)
+ *   1. a flag registered with the host (`--designer-<name>`, session wide)
+ *   2. `OMP_DESIGNER_FLAGS` — a JSON object in the environment (session/shell wide)
+ *   3. `.omp/designer-flags.json` in the working directory (project wide)
+ *   4. the defaults below (always enabled, so behaviour is unchanged by default)
+ *
+ * The host flags are registered without a default on purpose: the host then
+ * reports `undefined` until someone actually passes one, which is the only way to
+ * tell "the user turned this off" from "nobody said anything".
  *
  * Reading never throws: a missing file, unreadable file, malformed JSON, an
  * unknown key, or a value of the wrong type all fall back to the default. A typo
@@ -36,6 +41,26 @@ export const FLAG_DEFAULTS = Object.freeze({
 
 export const FLAG_FILE = join(".omp", "designer-flags.json");
 export const FLAG_ENV = "OMP_DESIGNER_FLAGS";
+
+/**
+ * The CLI name each flag answers to, so the extension and the flag reader cannot
+ * drift on what `--designer-motion` means.
+ */
+export const FLAG_CLI_NAMES = Object.freeze({
+  motion: "designer-motion",
+  dataviz: "designer-dataviz",
+  forms: "designer-forms",
+  verify: "designer-verify",
+  workshop: "designer-workshop",
+});
+
+/** One line per flag, for the host's `--help`. */
+export function flagDescriptions() {
+  return Object.entries(FLAG_CLI_NAMES).map(([name, cli]) => ({
+    cli,
+    description: `omp-designer: ${name} contract fragment (pass --${cli}=false to suppress it)`,
+  }));
+}
 
 function readJsonObject(path) {
   if (!existsSync(path)) return { value: null, source: null };
@@ -67,18 +92,36 @@ function readEnvObject(env) {
 /**
  * Resolve the effective flags.
  *
- * @param {{ cwd?: string, env?: Record<string, string | undefined> }} [options]
+ * @param {{ cwd?: string, env?: Record<string, string | undefined>, host?: Record<string, boolean | undefined> | null }} [options]
  * @returns {{ flags: Record<string, boolean>, sources: string[], ignored: string[] }}
  */
-export function resolveFlags({ cwd, env = process.env } = {}) {
+export function resolveFlags({ cwd, env = process.env, host = null } = {}) {
   const sources = [];
   const ignored = [];
   const file = cwd ? readJsonObject(join(cwd, FLAG_FILE)) : { value: null, source: null };
   const fromEnv = readEnvObject(env);
+  // A registered flag the user actually passed. Anything else on the host side
+  // (`undefined`, or a value the host invented) is not a choice and is skipped.
+  const hostFlags = [];
+  for (const [key, value] of Object.entries(host && typeof host === "object" ? host : {})) {
+    if (!Object.hasOwn(FLAG_DEFAULTS, key)) {
+      if (value !== undefined) ignored.push(`${key} (host flag, unknown)`);
+      continue;
+    }
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "boolean") {
+      ignored.push(`${key} (host flag, not a boolean)`);
+      continue;
+    }
+    hostFlags.push([key, value]);
+  }
+  const fromHost = hostFlags.length > 0
+    ? { value: Object.fromEntries(hostFlags), source: `--${hostFlags.map(([key]) => FLAG_CLI_NAMES[key] ?? key).join(" --")}` }
+    : { value: null, source: null };
   const flags = { ...FLAG_DEFAULTS };
 
   // Lowest precedence first so a later source overwrites it.
-  for (const layer of [file, fromEnv]) {
+  for (const layer of [file, fromEnv, fromHost]) {
     if (layer.source) sources.push(layer.source);
     if (!layer.value) continue;
     for (const [key, value] of Object.entries(layer.value)) {

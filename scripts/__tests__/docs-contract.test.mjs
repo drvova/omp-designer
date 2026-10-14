@@ -20,6 +20,7 @@ const piAdapter = read("extensions/designer.ts");
 const installation = read("docs/installation.md");
 const parity = read("docs/cc-parity.md");
 const evalDoc = read("docs/eval.md");
+const workshopDoc = read("docs/workshop.md");
 
 const checks = [
   ["package ships the shared core (incl. security.mjs)", pkg.files.some((f) => f === "shared/security.mjs" || f === "shared/" || f === "shared")],
@@ -59,6 +60,12 @@ const checks = [
   ["architecture skills table lists four skills", /designer-master[\s\S]*design-md[\s\S]*animate[\s\S]*review-skill/i.test(architecture)],
 
   // Secret hygiene.
+  // The way back is a loop: the page posts, the project records, the turn is told.
+  ["workshop doc documents the block, the log and the one-shot injection", /json workshop/.test(workshopDoc) && /workshop-decisions\.jsonl/.test(workshopDoc) && /never replayed|never re-?play/i.test(workshopDoc)],
+  ["README points at the workshop doc", /docs\/workshop\.md/.test(readme)],
+  ["README names the fragment flags", /--designer-motion/.test(readme) && /--designer-workshop/.test(readme)],
+  ["parity doc records the flag and workshop closes", /designer-motion/.test(parity) && /workshop-decisions\.jsonl/.test(parity)],
+  ["parity doc marks the interactive workshop closed", /~~\*\*The interactive half of the workshop\.\*\*~~ — \*\*done\*\*/.test(parity)],
   ["README says .env stays outside the repo", /keep real\s+credentials outside the repo|\.env is gitignored/i.test(readme)],
   ["AGENTS requires key rotation if exposed", /if a live\s+key was ever exposed[\s\S]*rotate it/i.test(agents)],
   ["problems.md records P0/P1/P2 status", /P0 — Security[\s\S]*P1 — Core logic[\s\S]*P2 — Host-bridge/i.test(problems)],

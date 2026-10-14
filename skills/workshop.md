@@ -61,3 +61,25 @@ canvas; do not create a parallel draft that can drift from the project.
   open decisions become assumptions; state them where the work is, and proceed.
 - The user wants to stop the loop → close it, and say what is settled and what
   remains open so nothing is silently lost.
+
+## The question the page can read
+
+The canvas server serves the project, so the open question can live on the page as
+buttons instead of only in prose. Write the question in the plan document in a
+fenced block with the `workshop` tag, and keep it to exactly one question:
+
+```json workshop
+{ "question": "Pricing on the home page, or its own route?",
+  "options": [
+    { "id": "inline", "label": "Keep it on the home page", "detail": "one scroll, no extra route" },
+    { "id": "route", "label": "Give it its own route", "detail": "room to grow, one more link" }
+  ] }
+```
+
+- The block is the same decision you are asking in prose. Say it once, both places.
+- `options[].id` is what the page records; `label` and `detail` are what the reader
+  sees. Two to four options, each with what it buys and costs.
+- When the reader clicks, the decision is written beside the project
+  (`.designer/workshop-decisions.jsonl`) and the next turn is told what was chosen.
+  Do not ask again; apply it and show the updated artefact.
+- Replace the block with the next question, or delete it when nothing is left open.

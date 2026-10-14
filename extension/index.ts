@@ -32,10 +32,11 @@ import { redactSecrets } from "../shared/security.mjs";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
 import { claimFindings } from "../shared/delivery-claims.mjs";
 import { readDriverReport, summarizeDriver } from "../shared/driver-report.mjs";
-import { readCanvasIndex, writeCanvasFiles } from "../shared/design-canvas.mjs";
+import { isPageWrite, readCanvasIndex, serveCanvas, writeCanvasFiles } from "../shared/design-canvas.mjs";
 import { formatCheckResult, summarizeCheck } from "../shared/designer-check.mjs";
 import { collectSkillUsage } from "../shared/skill-usage.mjs";
-import { resolveFlags, describeFlags } from "../shared/designer-flags.mjs";
+import { pendingDecisions, readOpenQuestion } from "../shared/workshop.mjs";
+import { FLAG_CLI_NAMES, describeFlags, flagDescriptions, resolveFlags } from "../shared/designer-flags.mjs";
 
 const HOME = homedir();
 const MODULE_FILE = fileURLToPath(import.meta.url);
@@ -311,7 +312,7 @@ function fragmentNamesFor(userPrompt: string, cwd: string, flags: Record<string,
  * owner-preference section are appended at the same anchor the marker strip uses,
  * so a turn with neither is byte-identical to the default.
  */
-function buildContract({ planOnly = false, fragments = [], vibe = "", workshop = "" }: { planOnly?: boolean; fragments?: string[]; vibe?: string; workshop?: string } = {}): string {
+function buildContract({ planOnly = false, fragments = [], vibe = "", workshop = "", decided = "" }: { planOnly?: boolean; fragments?: string[]; vibe?: string; workshop?: string; decided?: string } = {}): string {
   const base = planOnly ? PLAN_ONLY_PROMPT : DESIGNER_PROMPT;
   // Order comes from the declared fragment table, not from the caller, so a
   // future caller cannot reshuffle the contract. Unknown names drop out.
@@ -322,6 +323,11 @@ function buildContract({ planOnly = false, fragments = [], vibe = "", workshop =
     // and the goal is the user's words, not a fixed rule.
     workshop && fragments.includes("workshop")
       ? `\n\nWorkshop goal, in the user's words: ${workshop}`
+      : "",
+    // What the reader settled on the page. It rides with the workshop loop because
+    // it is the loop's other half: the decision was made, now it gets applied.
+    decided
+      ? `\n\n## The reader decided on the workshop page\n${decided}\nApply it to the work and show the updated artefact. Do not ask for it again.`
       : "",
     vibe,
   ].filter(Boolean);
@@ -355,6 +361,14 @@ interface ExtensionContext {
  */
 interface ExtensionAPI {
   registerTool?(definition: Record<string, unknown>): void;
+  /**
+   * `registerFlag(name, options)` — TWO positional arguments, as the host's own
+   * implementation reads `options.default`. A single options object throws inside
+   * the host (`undefined is not an object (evaluating 'p.default')`) and takes the
+   * whole extension down with it.
+   */
+  registerFlag?(name: string, options?: { description?: string; default?: unknown }): void;
+  getFlag?(name: string): unknown;
   registerCommand(
     name: string,
     options: {
@@ -402,6 +416,47 @@ function writeState(state: Record<string, boolean>): void {
   const temporary = `${STATE_FILE}.${process.pid}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
   renameSync(temporary, STATE_FILE);
+}
+
+/** Decisions already injected into a turn, keyed by working directory. */
+const workshopSeenByCwd = new Map<string, string[]>();
+
+/** Live canvas servers this session started, keyed by project. */
+const liveCanvases = new Map<string, { url: string; refresh: () => number; close: () => void }>();
+
+/** The open question on the workshop page, if there is one. */
+function workshopOpenQuestion(cwd: string): string | null {
+  try {
+    return readOpenQuestion(cwd).question;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The registered flags the user actually passed. The host reports `undefined`
+ * for a flag nobody set, which is not a choice, so it is dropped here rather
+ * than treated as `false`.
+ */
+function hostFlags(pi: ExtensionAPI): Record<string, boolean> | null {
+  if (typeof pi.getFlag !== "function") return null;
+  const read: Record<string, boolean> = {};
+  for (const [name, cli] of Object.entries(FLAG_CLI_NAMES)) {
+    const value = pi.getFlag(cli);
+    if (typeof value === "boolean") read[name] = value;
+  }
+  return Object.keys(read).length > 0 ? read : null;
+}
+
+function closeLiveCanvases(): void {
+  for (const [, live] of liveCanvases) {
+    try {
+      live.close();
+    } catch {
+      // A server that is already gone is not an error worth reporting.
+    }
+  }
+  liveCanvases.clear();
 }
 
 /** Open workshops, keyed by working directory. Same shape as the vibes file. */
@@ -1282,6 +1337,19 @@ export default function designerExtension(pi: ExtensionAPI): void {
     },
   });
 
+  // The fragments are real CLI flags, not only a project file: cc gates its own
+  // fragments per tenant, and this is the same switch a session can set. Registered
+  // without a default so the host reports `undefined` until someone passes one —
+  // the only way to tell "turned off" from "nobody said anything".
+  if (typeof pi.registerFlag === "function") {
+    for (const { cli, description } of flagDescriptions()) {
+      // No `default`: the host only seeds `flagValues` when a default is present,
+      // so an unpassed flag stays `undefined` — "nobody said anything", which is
+      // exactly the distinction the reader needs.
+      pi.registerFlag(cli, { description });
+    }
+  }
+
   // The model-callable check. cc's ArtifactCheck returns its field list *in the
   // tool result*, while the work is still open; the stop-time record can only
   // tell the model afterwards. Same diagnostics, right moment.
@@ -1303,6 +1371,7 @@ export default function designerExtension(pi: ExtensionAPI): void {
           start: { type: "string", description: "Command that serves the app (for example `npm run dev`). Omit when the app is already running." },
           out: { type: "string", description: "Capture directory, relative to the project. Defaults to `screenshots`." },
           project: { type: "string", description: "Project root. Defaults to the session directory." },
+          serve: { type: "boolean", description: "Also start a live canvas server for the project and return its URL, so the canvas stays current as pages are rewritten." },
         },
         additionalProperties: false,
       },
@@ -1334,7 +1403,13 @@ export default function designerExtension(pi: ExtensionAPI): void {
           warnings: formatted.counts.warnings,
           exitCode: run.status,
         });
-        return { content: [{ type: "text", text: formatted.text }] };
+        let text = formatted.text;
+        if (input.serve === true) {
+          const canvas = await ensureLiveCanvas(cwd);
+          if (canvas) text = `${text}\n\nLive canvas: ${canvas.url} (it reloads itself as the page changes)`;
+          if (canvas) writeTrace(cwd, "canvas_served", { url: canvas.url });
+        }
+        return { content: [{ type: "text", text }] };
       },
     });
   }
@@ -1395,6 +1470,47 @@ export default function designerExtension(pi: ExtensionAPI): void {
     },
   });
 
+  /** Start (or reuse) the session's live canvas for a project. */
+  async function ensureLiveCanvas(cwd: string): Promise<{ url: string } | null> {
+    const existing = liveCanvases.get(cwd);
+    if (existing) return { url: existing.url };
+    try {
+      const server = await serveCanvas({ cwd }, {
+        log: (line: string) => writeTrace(cwd, "canvas_served_log", { line }),
+        error: (line: string) => writeTrace(cwd, "canvas_served_error", { line }),
+      });
+      liveCanvases.set(cwd, { url: server.url, refresh: server.refresh, close: server.close });
+      return { url: server.url };
+    } catch (error) {
+      writeTrace(cwd, "canvas_served_failed", { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
+
+  // cc publishes a board and open viewers get it without asking. The filesystem
+  // watcher already covers most of that; this covers the case where the agent
+  // rewrites a page in the same session that is serving it, with no poll delay.
+  pi.on("tool_result", (event, ctx) => {
+    const cwd = ctx?.cwd ?? process.cwd();
+    if (!isEnabled(cwd) || liveCanvases.size === 0) return;
+    const record = asRecord(event);
+    const toolName = typeof record.toolName === "string" ? record.toolName : "";
+    const input = asRecord(record.input);
+    if (!isPageWrite(toolName, input)) return;
+    const live = liveCanvases.get(cwd);
+    if (!live) return;
+    try {
+      const boards = live.refresh();
+      writeTrace(cwd, "canvas_refreshed", { boards, tool: toolName });
+    } catch (error) {
+      writeTrace(cwd, "canvas_refresh_failed", { error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  pi.on("session_shutdown", () => {
+    closeLiveCanvases();
+  });
+
   pi.on("resources_discover", (_event, ctx) => {
     const cwd = ctx?.cwd ?? process.cwd();
     if (!isEnabled(cwd)) return;
@@ -1422,14 +1538,26 @@ export default function designerExtension(pi: ExtensionAPI): void {
     const planOnly = asksForApprovalPlan(userPrompt);
     // Flags are read per turn so a project can change them without a restart,
     // and so a malformed flag file can only ever fall back to defaults.
-    const { flags, sources: flagSources, ignored: flagsIgnored } = resolveFlags({ cwd });
+    const { flags, sources: flagSources, ignored: flagsIgnored } = resolveFlags({ cwd, host: hostFlags(pi) });
     const fragments = fragmentNamesFor(userPrompt, cwd, flags);
     // Workshop mode is per project, not per request: while it is open, every turn
     // gets the loop and the goal, the way cc's canvas carries its own state.
     const goal = workshopGoal(cwd);
     if (goal && flags.workshop !== false && !fragments.includes("workshop")) fragments.push("workshop");
     // The vibe lives inside the prompt markers so re-injection strips it too.
-    const prompt = buildContract({ planOnly, fragments, vibe: vibeSection(cwd), workshop: goal });
+    // Decisions the reader made on the canvas page since the last turn. The page is
+    // the channel back: a click lands beside the project, and this turn is told.
+    const decided = flags.workshop === false ? [] : pendingDecisions(cwd, workshopSeenByCwd.get(cwd) ?? []);
+    const decisionLine = decided.length > 0
+      ? decided
+          .map((entry) => `The reader chose **${entry.label}**${entry.detail ? ` (${entry.detail})` : ""} for "${entry.question}".`)
+          .join("\n")
+      : "";
+    if (decided.length > 0) {
+      workshopSeenByCwd.set(cwd, [...(workshopSeenByCwd.get(cwd) ?? []), ...decided.map((entry) => entry.id)]);
+      writeTrace(cwd, "workshop_decisions_applied", { count: decided.length, options: decided.map((entry) => entry.optionId) });
+    }
+    const prompt = buildContract({ planOnly, fragments, vibe: vibeSection(cwd), workshop: goal, decided: decisionLine });
     const prompts = stripDesignerPrompt(normalizeSystemPrompt(asRecord(event).systemPrompt));
     writeTrace(cwd, "prompt_injected", {
       version: 5,
@@ -1438,6 +1566,7 @@ export default function designerExtension(pi: ExtensionAPI): void {
       fragments,
       flagSources,
       flagsIgnored,
+      ...(workshopOpenQuestion(cwd) ? { workshopQuestion: workshopOpenQuestion(cwd) } : {}),
     });
     return { systemPrompt: [...prompts, prompt] };
   });
@@ -1445,6 +1574,7 @@ export default function designerExtension(pi: ExtensionAPI): void {
   pi.on("session_stop", (event, ctx) => {
     const cwd = ctx?.cwd ?? process.cwd();
     if (!isEnabled(cwd)) return;
+    closeLiveCanvases();
     const eventRecord = asRecord(event);
     const sessionStart = sessionStartByCwd.get(cwd);
     // Prefer the host session id; otherwise fall back to cwd + this session's

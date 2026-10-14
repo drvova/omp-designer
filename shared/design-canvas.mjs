@@ -16,9 +16,38 @@ import { createServer } from "node:http";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readDriverReport } from "./driver-report.mjs";
+import {
+  WORKSHOP_PANEL_SCRIPT,
+  WORKSHOP_PANEL_STYLE,
+  readOpenQuestion,
+  recordDecision,
+  renderWorkshopPanel,
+} from "./workshop.mjs";
 
 export const CANVAS_HTML_FILE = "designer-canvas.html";
 export const CANVAS_INDEX_FILE = "canvas.json";
+
+/** Page-shaped files: the ones a viewer of the canvas would want the moment they land. */
+const PAGE_WRITE_RE = /\.(html?|css|jsx?|tsx?|vue|svelte|astro|mdx?)$/i;
+
+/**
+ * Did this tool call write a page?
+ *
+ * cc refreshes its canvas the moment a publish lands. The local equivalent is
+ * narrower on purpose: only file-writing tools, only page-shaped paths, so a
+ * capture or a log write does not trigger a rebuild.
+ *
+ * @param {string} toolName
+ * @param {Record<string, unknown>} [input]
+ */
+export function isPageWrite(toolName, input = {}) {
+  if (!/^(write|edit|multiedit|patch|apply_patch)$/i.test(String(toolName ?? ""))) return false;
+  for (const key of ["file_path", "filePath", "path", "file", "filename"]) {
+    const value = input?.[key];
+    if (typeof value === "string" && value) return PAGE_WRITE_RE.test(value);
+  }
+  return false;
+}
 
 /** Cell geometry for the deterministic grid. Captures keep their aspect. */
 const CELL_WIDTH = 760;
@@ -226,7 +255,7 @@ apply();
  * `escapeHtml`, and the embedded index through `escapeJson`, because a board
  * named `"><script>` is a filename someone can create.
  */
-export function renderCanvasHtml({ title, boards, index, generatedAt, report = null }) {
+export function renderCanvasHtml({ title, boards, index, generatedAt, report = null, project = null }) {
   const width = Math.max(
     1200,
     ...Object.values(index.boards).map((board) => board.x + board.w + index.cell.margin),
@@ -259,7 +288,7 @@ export function renderCanvasHtml({ title, boards, index, generatedAt, report = n
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} — design canvas</title>
-<style>${style}</style>
+<style>${style}${project ? WORKSHOP_PANEL_STYLE : ""}</style>
 </head>
 <body>
 <header>
@@ -276,8 +305,10 @@ export function renderCanvasHtml({ title, boards, index, generatedAt, report = n
 ${cards || '    <p class="empty">No boards yet. Run the driver or add <code>project/*.dc.html</code> boards.</p>'}
   </div>
 </div>
+${project ? renderWorkshopPanel(project) : ""}
 <script>window.__canvas = ${escapeJson(index)};</script>
 <script>${script}</script>
+${project ? `<script>${WORKSHOP_PANEL_SCRIPT}</script>` : ""}
 </body>
 </html>
 `;
@@ -289,7 +320,7 @@ ${cards || '    <p class="empty">No boards yet. Run the driver or add <code>proj
  * "what the canvas is", not two that drift.
  */
 export function writeCanvasFiles(cwd, { title = "", generatedAt = new Date().toISOString(), columns = COLUMNS } = {}) {
-  const built = buildCanvas({ cwd, title, generatedAt, columns });
+  const built = buildCanvas({ cwd, title, generatedAt, columns, project: cwd });
   // A transient unreadable directory must never empty a canvas that had boards:
   // report the previous state instead of writing a wrong one.
   if (built.unreadable && built.boards.length === 0) {
@@ -322,6 +353,10 @@ export function writeCanvasFiles(cwd, { title = "", generatedAt = new Date().toI
  *
  * Files are served relative to the project with a traversal guard, because the
  * board files and captures are the page's own assets.
+ *
+ * @param {{ cwd: string, port?: number, title?: string, host?: string }} options
+ * @param {{ log?: (line: string) => void, error?: (line: string) => void }} [io]
+ * @returns {Promise<{ url: string, port: number, boards: number, refresh: () => number, close: () => void }>}
  */
 export function serveCanvas({ cwd, port = 0, title = "", host = "127.0.0.1" } = {}, io = console) {
   const root = cwd;
@@ -351,6 +386,40 @@ export function serveCanvas({ cwd, port = 0, title = "", host = "127.0.0.1" } = 
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://${host}`);
+    if (url.pathname === "/workshop" || url.pathname === "/workshop/decide") {
+      const open = readOpenQuestion(root);
+      if (url.pathname === "/workshop" && request.method !== "POST") {
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ question: open.question, options: open.options, problem: open.problem }));
+        return;
+      }
+      if (request.method !== "POST") {
+        response.writeHead(405, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: false, reason: "POST to /workshop/decide" }));
+        return;
+      }
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > 4096) request.destroy();
+      });
+      request.on("end", () => {
+        let optionId = null;
+        try {
+          optionId = JSON.parse(body || "{}")?.optionId;
+        } catch {
+          optionId = null;
+        }
+        const recorded = recordDecision(root, { optionId: typeof optionId === "string" ? optionId : "" });
+        response.writeHead(recorded.ok ? 200 : 400, { "content-type": "application/json" });
+        response.end(JSON.stringify(recorded.ok ? { ok: true, decision: recorded.decision } : recorded));
+        if (recorded.ok) {
+          rebuild();
+          broadcast();
+        }
+      });
+      return;
+    }
     if (url.pathname === "/events") {
       response.writeHead(200, {
         "content-type": "text/event-stream",
@@ -414,6 +483,13 @@ export function serveCanvas({ cwd, port = 0, title = "", host = "127.0.0.1" } = 
         url,
         port: boundPort,
         boards,
+        // The extension calls this when the agent writes a page, so a viewer open
+        // on the canvas sees the change without waiting for the filesystem watcher.
+        refresh: () => {
+          const count = rebuild();
+          broadcast();
+          return count;
+        },
         close: () => {
           if (timer) clearTimeout(timer);
           watcher.close();
@@ -453,7 +529,7 @@ export function readCanvasIndex(cwd) {
 }
 
 /** Assemble everything for one project. Returns the index and the page source. */
-export function buildCanvas({ cwd, title = "", generatedAt = new Date().toISOString(), columns = COLUMNS } = {}) {
+export function buildCanvas({ cwd, title = "", generatedAt = new Date().toISOString(), columns = COLUMNS, project = null } = {}) {
   const collected = collectBoards(cwd, title);
   const index = {
     v: 1,
@@ -475,6 +551,7 @@ export function buildCanvas({ cwd, title = "", generatedAt = new Date().toISOStr
       index,
       generatedAt,
       report: collected.driver,
+      project: project ?? cwd,
     }),
     boards: collected.boards,
   };

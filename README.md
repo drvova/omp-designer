@@ -42,8 +42,16 @@ npm run check:link            # prove the registered plugin is this checkout
 Measuring the harness itself (did the session render the page, capture it after its
 last edit, and tell the truth about it): [docs/eval.md](docs/eval.md).
 
+Working a design *with* someone — one open decision per turn, the choice made by
+clicking the canvas, the next turn told what was chosen:
+[docs/workshop.md](docs/workshop.md).
+
 Full detail, the four verification proofs, and the symptoms of a published copy
 being live: [docs/installation.md](docs/installation.md).
+
+The contract fragments are also real flags: `--designer-motion`,
+`--designer-dataviz`, `--designer-forms`, `--designer-verify`,
+`--designer-workshop` (each takes `=false` to suppress it for a session).
 
 ### Parity with the claude-code harness
 

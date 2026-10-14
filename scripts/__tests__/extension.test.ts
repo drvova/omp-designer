@@ -37,7 +37,9 @@ describe("v5 extension", () => {
     module.default(api);
     expect(commands.map((command) => command.name)).toEqual(["designer", "designer-vibe", "designer-workshop", "designer-canvas", "designer-doctor"]);
     expect(handlers.has("tool_call")).toBe(false);
-    expect(handlers.has("tool_result")).toBe(false);
+    // tool_result is observed, never gated on: it exists so an open canvas can be
+    // refreshed the moment a page is rewritten, and it returns nothing.
+    expect(handlers.has("tool_result")).toBe(true);
   });
 
   test("discovers exactly nine package-relative skills", () => {

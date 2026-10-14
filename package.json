@@ -81,7 +81,7 @@
     "test:cleanup": "node scripts/__tests__/cleanup-artifacts.test.mjs",
     "cleanup:artifacts": "node scripts/cleanup-artifacts.mjs",
     "test:security": "node scripts/__tests__/security.test.mjs",
-    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:claims && npm run test:driver-report && npm run test:canvas && npm run test:designer-check && npm run test:eval-graders && npm run test:eval-runner && npm run test:link && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
+    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:claims && npm run test:driver-report && npm run test:canvas && npm run test:designer-check && npm run test:eval-graders && npm run test:eval-runner && npm run test:workshop && npm run test:link && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
     "e2e:smoke": "bun scripts/e2e-smoke.mjs",
     "test:real": "node scripts/real-agent-eval.mjs",
     "test:real:suite": "node scripts/real-agent-eval.mjs --suite",
@@ -104,6 +104,7 @@
     "test:designer-check": "node scripts/__tests__/designer-check.test.mjs",
     "test:eval-graders": "node scripts/__tests__/eval-graders.test.mjs",
     "test:eval-runner": "node scripts/__tests__/eval-runner.test.mjs",
+    "test:workshop": "node scripts/__tests__/workshop-loop.test.mjs",
     "eval": "node scripts/designer-eval.mjs",
     "eval:list": "node scripts/designer-eval.mjs --dry-run"
   },

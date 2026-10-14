@@ -53,7 +53,12 @@ function makeHost() {
   const commands: string[] = [];
   const commandOptions = new Map<string, Record<string, unknown>>();
   const tools: Array<Record<string, unknown>> = [];
+  const flags: Array<Record<string, unknown>> = [];
   const handlers = new Map<string, Handler[]>();
+  // What the host reports for each registered flag. A flag nobody passed is
+  // absent (the host says `undefined`), which is the distinction the reader
+  // depends on: "turned off" must not look like "nobody said anything".
+  const flagValues = new Map<string, unknown>();
   const api = {
     registerCommand(name: string, options: unknown) {
       commands.push(name);
@@ -61,6 +66,20 @@ function makeHost() {
     },
     registerTool(definition: unknown) {
       tools.push(definition as Record<string, unknown>);
+    },
+    registerFlag(name: string, options?: Record<string, unknown>) {
+      // The real host reads `options.default` unconditionally, so calling it with a
+      // single options object throws inside the host and the extension never loads
+      // (`undefined is not an object (evaluating 'p.default')`). The simulated host
+      // has to be exactly as strict, or the suite passes on a call shape the real
+      // runtime refuses.
+      if (options === undefined) {
+        throw new TypeError("undefined is not an object (evaluating 'p.default')");
+      }
+      flags.push({ name, ...options });
+    },
+    getFlag(name: string) {
+      return flagValues.get(name);
     },
     on(event: string, handler: Handler) {
       const entries = handlers.get(event) ?? [];
@@ -72,7 +91,7 @@ function makeHost() {
     if (ctx?.cwd) traceCwds.add(ctx.cwd);
     return handlers.get(event)?.[0]?.(payload, ctx);
   };
-  return { commands, commandOptions, tools, handlers, api, fire };
+  return { commands, commandOptions, tools, flags, flagValues, handlers, api, fire };
 }
 
 function makeTempProject(withBuildScript: boolean): string {
@@ -99,6 +118,25 @@ function ageSources(dir: string): void {
     }
   };
   stamp(dir);
+}
+
+/** The trace lines for one cwd, parsed — the payload matters for flag sources. */
+function traceEntries(cwd: string): Array<{ event?: string; [key: string]: unknown }> {
+  if (!existsSync(TRACE_DIR)) return [];
+  const entries: Array<{ event?: string; [key: string]: unknown }> = [];
+  for (const file of readdirSync(TRACE_DIR)) {
+    if (!file.endsWith(".jsonl")) continue;
+    for (const line of readFileSync(join(TRACE_DIR, file), "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line) as { event?: string; cwd?: string };
+        if (parsed.cwd === cwd) entries.push(parsed as { event?: string; [key: string]: unknown });
+      } catch {
+        // ignore malformed trace lines
+      }
+    }
+  }
+  return entries;
 }
 
 function traceEvents(cwd: string): string[] {
@@ -134,7 +172,10 @@ describe("P2: OMP hook registration", () => {
     expect(host.handlers.has("resources_discover")).toBe(true);
     expect(host.handlers.has("session_stop")).toBe(true);
     expect(host.handlers.has("tool_call")).toBe(false);
-    expect(host.handlers.has("tool_result")).toBe(false);
+    // tool_result is observed, never gated on: the handler exists so an open
+    // canvas can be refreshed the moment a page is rewritten, and it returns
+    // nothing — it cannot block, rewrite, or annotate a tool call.
+    expect(host.handlers.has("tool_result")).toBe(true);
   });
 
   test("resources_discover exposes exactly the nine skill resources", () => {
@@ -620,7 +661,7 @@ describe("P2: designer_check (the tool the model calls)", () => {
     expect(String(tool.description)).toMatch(/captures at 1440 and 375/);
     const parameters = tool.parameters as { type?: string; properties?: Record<string, unknown>; additionalProperties?: boolean };
     expect(parameters.type).toBe("object");
-    expect(Object.keys(parameters.properties ?? {}).sort()).toEqual(["out", "project", "start", "url"]);
+    expect(Object.keys(parameters.properties ?? {}).sort()).toEqual(["out", "project", "serve", "start", "url"]);
     expect(parameters.additionalProperties).toBe(false);
     expect(typeof tool.execute).toBe("function");
   });
@@ -699,6 +740,103 @@ describe("P2: OMP vs Pi capability difference", () => {
     }, { cwd }) as { continue?: boolean; additionalContext?: string };
     expect(result.continue).toBe(true);
     expect(result.additionalContext).toContain("[DESIGNER PLAN CHECKS FAILED]");
+  });
+});
+
+describe("P3: the fragments are real host flags", () => {
+  test("every fragment flag is registered with the host", () => {
+    const names = host.flags.map((flag) => flag.name);
+    expect(names).toEqual([
+      "designer-motion",
+      "designer-dataviz",
+      "designer-forms",
+      "designer-verify",
+      "designer-workshop",
+    ]);
+  });
+
+  test("a flag the user passed beats the defaults, and says so in the trace", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omp-e2e-flags-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "index.html"), "<!doctype html><title>t</title>");
+    const prompt = "Build the landing page and let me see it in the browser.";
+
+    host.flagValues.set("designer-verify", undefined);
+    host.fire("before_agent_start", { prompt, systemPrompt: ["base"] }, { cwd: dir });
+    const on = traceEntries(dir).filter((entry) => entry.event === "prompt_injected").at(-1) as { fragments?: string[] };
+
+    host.flagValues.set("designer-verify", false);
+    const suppressed = host.fire("before_agent_start", { prompt, systemPrompt: ["base"] }, { cwd: dir }) as { systemPrompt: string[] };
+    const off = traceEntries(dir).filter((entry) => entry.event === "prompt_injected").at(-1) as {
+      fragments?: string[];
+      flagSources?: string[];
+    };
+    host.flagValues.delete("designer-verify");
+
+    expect(on.fragments).toContain("verify");
+    expect(off.fragments).not.toContain("verify");
+    expect(off.flagSources).toContain("--designer-verify");
+    expect(suppressed.systemPrompt.join("")).not.toContain("Verify the work");
+  });
+});
+
+describe("P3: the workshop's way back", () => {
+  const plan = [
+    "# Workshop",
+    "",
+    "\`\`\`json workshop",
+    '{ "question": "Pricing on the home page, or its own route?",',
+    '  "options": [ { "id": "inline", "label": "Keep it on the home page", "detail": "one scroll" },',
+    '               { "id": "route", "label": "Give it its own route", "detail": "room to grow" } ] }',
+    "\`\`\`",
+    "",
+  ].join("\n");
+
+  test("a decision made on the page is injected on the next turn, exactly once", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omp-e2e-decide-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "WORKSHOP.md"), plan);
+    const goal = { prompt: "Continue the workshop.", systemPrompt: ["base"] };
+
+    // Nothing chosen yet: the question is open, so the turn is told what it is.
+    host.fire("before_agent_start", goal, { cwd: dir });
+    expect(traceEntries(dir).filter((entry) => entry.event === "workshop_decisions_applied")).toHaveLength(0);
+
+    // The reader clicks on the canvas.
+    mkdirSync(join(dir, ".designer"), { recursive: true });
+    writeFileSync(join(dir, ".designer", "workshop-decisions.jsonl"), `${JSON.stringify({
+      id: "d-1",
+      question: "Pricing on the home page, or its own route?",
+      optionId: "route",
+      label: "Give it its own route",
+      detail: "room to grow",
+      at: "2026-10-13T10:00:00.000Z",
+    })}\n`);
+
+    const first = host.fire("before_agent_start", goal, { cwd: dir }) as { systemPrompt: string[] };
+    expect(first.systemPrompt.join("")).toContain("Give it its own route");
+    expect(first.systemPrompt.join("")).toContain("Do not ask for it again");
+    const applied = traceEntries(dir).filter((entry) => entry.event === "workshop_decisions_applied");
+    expect(applied).toHaveLength(1);
+
+    // The next turn must not replay it: the reader answered, the work moves on.
+    const second = host.fire("before_agent_start", goal, { cwd: dir }) as { systemPrompt: string[] };
+    expect(second.systemPrompt.join("")).not.toContain("The reader decided on the workshop page");
+    expect(traceEntries(dir).filter((entry) => entry.event === "workshop_decisions_applied")).toHaveLength(1);
+  });
+
+  test("a page write with no open canvas is a no-op, not an error", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omp-e2e-refresh-"));
+    tempDirs.push(dir);
+    const handler = host.handlers.get("tool_result")?.[0];
+    expect(typeof handler).toBe("function");
+    const result = handler?.(
+      { type: "tool_result", toolName: "write", input: { file_path: join(dir, "index.html") }, content: "ok" },
+      { cwd: dir },
+    );
+    expect(result).toBeUndefined();
+    expect(traceEntries(dir).filter((entry) => entry.event === "canvas_refreshed")).toHaveLength(0);
+    expect(traceEntries(dir).filter((entry) => entry.event === "canvas_refresh_failed")).toHaveLength(0);
   });
 });
 
