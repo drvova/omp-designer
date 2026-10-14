@@ -451,6 +451,22 @@ function mcpSummary(): string {
   }
 }
 
+/**
+ * Last recorded visual evidence per working directory, for the doctor report.
+ * The trace on disk stays the durable record; this only saves the doctor a read.
+ */
+const evidenceByCwd = new Map<string, string>();
+
+function recordScreenshotEvidence(
+  cwd: string,
+  sessionId: string,
+  evidence: ScreenshotEvidence,
+): void {
+  const line = `${evidence.state} (captures: ${evidence.found}, stale: ${evidence.stale})`;
+  evidenceByCwd.set(cwd, line);
+  writeTrace(cwd, "screenshot_evidence", { sessionId, ...evidence });
+}
+
 function doctorReport(cwd: string): string {
   const moduleRealpath = safeRealpath(MODULE_FILE);
   const legacyRealpath = safeRealpath(LEGACY_EXTENSION);
@@ -474,6 +490,7 @@ function doctorReport(cwd: string): string {
     `Palette data: ${existsSync(join(DATA_ROOT, "colors.csv")) ? "present" : "missing"}`,
     `MCPs: ${mcpSummary()}`,
     `Skill usage (last session_stop): ${skillUsageByCwd.get(cwd) ?? "not measured yet"}`,
+    `Screenshot evidence (last session_stop): ${evidenceByCwd.get(cwd) ?? "not measured yet"}`,
     describeFlags(resolveFlags({ cwd })),
     "",
     ...skills,
@@ -771,6 +788,22 @@ interface TasteItem {
   detail: string;
 }
 
+/**
+ * Files whose change alters what the page looks like. A logic-only edit (a .ts
+ * store, a test) must not demand a capture; a stylesheet or markup edit must,
+ * because the rendered result is the thing that changed and nothing in the
+ * record would otherwise show it was never looked at.
+ */
+const VISUAL_SURFACE_EXT = /\.(?:css|scss|sass|less|html?|vue|svelte|astro|jsx|tsx)$/i;
+
+interface ScreenshotEvidence {
+  state: "fresh" | "stale" | "missing" | "none";
+  found: number;
+  stale: number;
+  newestSourceEdit: number;
+  newestCapture: number;
+}
+
 function findScreenshots(cwd: string): string[] {
   const results: string[] = [];
   let budget = 2000;
@@ -813,7 +846,11 @@ function reportIssues(report: Record<string, unknown> | null): Array<Record<stri
   return Array.isArray(report?.issues) ? report.issues as Array<Record<string, unknown>> : [];
 }
 
-function tasteReview(cwd: string, userFacts = ""): TasteItem[] {
+function tasteReview(
+  cwd: string,
+  userFacts = "",
+  sessionStart?: number,
+): { items: TasteItem[]; evidence: ScreenshotEvidence } {
   const items: TasteItem[] = [];
 
   const layoutReport = parseValidatorJson(LAYOUT_SCRIPT, cwd);
@@ -845,47 +882,78 @@ function tasteReview(cwd: string, userFacts = ""): TasteItem[] {
     if (found) items.push({ rule, detail: `${String(found.message ?? "")} (e.g. ${JSON.stringify(found.value ?? "")})` });
   }
 
-  // Screenshots captured before the last source edit are stale evidence.
+  // Screenshots captured before the last source edit are stale evidence, and a
+  // visual change with no capture at all means the page was never measured.
+  // The scan runs unconditionally: with no captures there is nothing to compare
+  // against, but the absence itself is the finding.
   const screenshots = findScreenshots(cwd);
-  if (screenshots.length > 0) {
-    let latestSource = 0;
-    let budget = 3000;
-    const scanSources = (dir: string): void => {
-      let entries;
-      try {
-        entries = readdirSync(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const entry of entries) {
-        if (budget-- <= 0) return;
-        const full = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (!CHANGE_SKIP_DIRS.has(entry.name)) scanSources(full);
-        } else if (/\.(?:tsx|jsx|ts|js|css|html|vue|svelte)$/i.test(entry.name)) {
-          try {
-            const mtime = statSync(full).mtimeMs;
-            if (mtime > latestSource) latestSource = mtime;
-          } catch {
-            // unreadable file: ignore
-          }
+  let newestSourceEdit = 0;
+  let newestVisualEdit = 0;
+  let budget = 3000;
+  const scanSources = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (budget-- <= 0) return;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!CHANGE_SKIP_DIRS.has(entry.name)) scanSources(full);
+      } else if (/\.(?:tsx|jsx|ts|js|css|html|vue|svelte)$/i.test(entry.name)) {
+        try {
+          const mtime = statSync(full).mtimeMs;
+          if (mtime > newestSourceEdit) newestSourceEdit = mtime;
+          if (VISUAL_SURFACE_EXT.test(entry.name) && mtime > newestVisualEdit) newestVisualEdit = mtime;
+        } catch {
+          // unreadable file: ignore
         }
       }
-    };
-    scanSources(cwd);
-    const staleShots = screenshots.filter((shot) => {
-      try {
-        return statSync(shot).mtimeMs < latestSource;
-      } catch {
-        return false;
-      }
-    });
-    if (latestSource > 0 && staleShots.length === screenshots.length) {
-      items.push({
-        rule: "stale-screenshots",
-        detail: "Every screenshot predates the latest source edit; the captures no longer show the shipped page. Recapture after the final change.",
-      });
     }
+  };
+  scanSources(cwd);
+
+  let newestCapture = 0;
+  let staleShots = 0;
+  for (const shot of screenshots) {
+    try {
+      const mtime = statSync(shot).mtimeMs;
+      if (mtime > newestCapture) newestCapture = mtime;
+      if (mtime < newestSourceEdit) staleShots += 1;
+    } catch {
+      // unreadable capture: ignore
+    }
+  }
+
+  const visualChangeThisSession =
+    sessionStart !== undefined && newestVisualEdit >= sessionStart;
+  const state: ScreenshotEvidence["state"] = screenshots.length === 0
+    ? (visualChangeThisSession ? "missing" : "none")
+    : (newestSourceEdit > 0 && staleShots === screenshots.length ? "stale" : "fresh");
+  const evidence: ScreenshotEvidence = {
+    state,
+    found: screenshots.length,
+    stale: staleShots,
+    newestSourceEdit: Math.round(newestSourceEdit),
+    newestCapture: Math.round(newestCapture),
+  };
+
+  if (state === "stale") {
+    items.push({
+      rule: "stale-screenshots",
+      detail: "Every screenshot predates the latest source edit; the captures no longer show the shipped page. Recapture after the final change.",
+    });
+  }
+  // Proportional: only a substantive project (the same bar that asks for
+  // DESIGN.md and PRODUCT.md) is told to capture; a one-file page that just
+  // changed is recorded, not chased.
+  if (state === "missing" && substantive) {
+    items.push({
+      rule: "missing-screenshot-evidence",
+      detail: "The visual surface changed this session and the project holds no capture, so nothing in the record shows the rendered page was looked at. Save a full-page screenshot at a narrow and a wide viewport in the project (screenshot-*.png or a screenshots/ folder), open it, and fix what it shows at 375px too.",
+    });
   }
 
   for (const shot of screenshots) {
@@ -941,7 +1009,7 @@ function tasteReview(cwd: string, userFacts = ""): TasteItem[] {
     }
   }
 
-  return items;
+  return { items, evidence };
 }
 
 export default function designerExtension(pi: ExtensionAPI): void {
@@ -1164,7 +1232,9 @@ export default function designerExtension(pi: ExtensionAPI): void {
 
       // Delivery is objectively fine; now look for default-AI aesthetics.
       // Taste never blocks, but detected slop earns one self-repair pass.
-      const tasteItems = tasteReview(cwd, userFactsByCwd.get(cwd) ?? "");
+      const review = tasteReview(cwd, userFactsByCwd.get(cwd) ?? "", sessionStart);
+      const tasteItems = review.items;
+      recordScreenshotEvidence(cwd, sessionId, review.evidence);
       writeTrace(cwd, tasteItems.length === 0 ? "taste_review_passed" : "taste_review_flagged", {
         sessionId,
         rules: tasteItems.map((item) => item.rule),
@@ -1198,7 +1268,9 @@ export default function designerExtension(pi: ExtensionAPI): void {
 
     // Piggyback taste findings on the same repair turn: a session that ends in
     // delivery failure would otherwise ship with its taste problems unreviewed.
-    const failureTasteItems = tasteReview(cwd, userFactsByCwd.get(cwd) ?? "");
+    const failureReview = tasteReview(cwd, userFactsByCwd.get(cwd) ?? "", sessionStart);
+    const failureTasteItems = failureReview.items;
+    recordScreenshotEvidence(cwd, sessionId, failureReview.evidence);
     return {
       continue: true,
       additionalContext: truncate([

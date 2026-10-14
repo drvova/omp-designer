@@ -51,10 +51,12 @@ type Handler = (event?: unknown, ctx?: { cwd?: string }) => unknown;
 // A fake host that records the exact surface an adapter registers against.
 function makeHost() {
   const commands: string[] = [];
+  const commandOptions = new Map<string, Record<string, unknown>>();
   const handlers = new Map<string, Handler[]>();
   const api = {
-    registerCommand(name: string, _options: unknown) {
+    registerCommand(name: string, options: unknown) {
       commands.push(name);
+      commandOptions.set(name, options as Record<string, unknown>);
     },
     on(event: string, handler: Handler) {
       const entries = handlers.get(event) ?? [];
@@ -66,7 +68,7 @@ function makeHost() {
     if (ctx?.cwd) traceCwds.add(ctx.cwd);
     return handlers.get(event)?.[0]?.(payload, ctx);
   };
-  return { commands, handlers, api, fire };
+  return { commands, commandOptions, handlers, api, fire };
 }
 
 function makeTempProject(withBuildScript: boolean): string {
@@ -381,6 +383,118 @@ describe("P2: taste-review bridge", () => {
     const result = host.fire("session_stop", { session_id: "taste-clean", ...assistant("Shipped.") }, { cwd: dir });
     expect(result).toBeUndefined();
     expect(traceEvents(dir)).toContain("taste_review_passed");
+  });
+
+  // --- screenshot evidence ---------------------------------------------------
+  // The record answers "was the rendered page ever looked at?". A capture that
+  // does not exist cannot be evidence of a clean render, so the absence is
+  // recorded on every frontend stop and only chased when the project is
+  // substantive enough for the same bar that asks for DESIGN.md.
+
+  function traceRecords(cwd: string): Array<Record<string, unknown>> {
+    if (!existsSync(TRACE_DIR)) return [];
+    const records: Array<Record<string, unknown>> = [];
+    for (const file of readdirSync(TRACE_DIR)) {
+      if (!file.endsWith(".jsonl")) continue;
+      for (const line of readFileSync(join(TRACE_DIR, file), "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          if (parsed.cwd === cwd) records.push(parsed);
+        } catch {
+          // A partially written line is not a test failure.
+        }
+      }
+    }
+    return records;
+  }
+
+  function makeSubstantiveProject(): string {
+    const dir = mkdtempSync(join(tmpdir(), "omp-e2e-substantive-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "substantive-fixture", private: true }));
+    writeFileSync(join(dir, "index.html"), "<!doctype html><html lang=\"en\"><head><title>Atelier Oak</title><meta name=\"description\" content=\"Handmade oak tables built to order.\"><link rel=\"icon\" href=\"data:,\"></head><body><h1>Atelier Oak</h1><p>Handmade oak tables, built to order.</p></body></html>\n");
+    mkdirSync(join(dir, "css"));
+    writeFileSync(join(dir, "css", "style.css"), "body { background: #faf7f2; color: #201d18; }\nh1 { font-size: clamp(2rem, 6vw, 3rem); }\n@media (min-width: 60rem) { body { padding: 2rem; } }\n");
+    mkdirSync(join(dir, "js"));
+    writeFileSync(join(dir, "js", "main.js"), "document.documentElement.dataset.ready = \"1\";\n");
+    return dir;
+  }
+
+  test("a visual change with no capture is recorded and earns a capture turn", () => {
+    const dir = makeSubstantiveProject();
+    ageSources(dir);
+    host.fire("before_agent_start", { prompt: "Redesign the hero section of my workshop site.", systemPrompt: ["base"] }, { cwd: dir });
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(dir, "css", "style.css"), future, future);
+
+    const result = host.fire("session_stop", { session_id: "evidence-missing", ...assistant("Shipped.") }, { cwd: dir }) as {
+      continue?: boolean;
+      additionalContext?: string;
+    };
+    expect(result?.continue).toBe(true);
+    expect(result?.additionalContext).toContain("missing-screenshot-evidence");
+
+    const record = traceRecords(dir).find((entry) => entry.event === "screenshot_evidence");
+    expect(record?.state).toBe("missing");
+    expect(record?.found).toBe(0);
+  });
+
+  test("a capture newer than every source edit clears the demand", () => {
+    const dir = makeSubstantiveProject();
+    writeFileSync(join(dir, "screenshot-desktop.png"), solidPng(100, 150));
+    ageSources(dir);
+    host.fire("before_agent_start", { prompt: "Redesign the hero section of my workshop site.", systemPrompt: ["base"] }, { cwd: dir });
+    const edited = new Date(Date.now() + 60_000);
+    utimesSync(join(dir, "css", "style.css"), edited, edited);
+    const captured = new Date(Date.now() + 120_000);
+    utimesSync(join(dir, "screenshot-desktop.png"), captured, captured);
+
+    const result = host.fire("session_stop", { session_id: "evidence-fresh", ...assistant("Shipped.") }, { cwd: dir }) as {
+      additionalContext?: string;
+    } | undefined;
+    expect(result?.additionalContext ?? "").not.toContain("missing-screenshot-evidence");
+
+    const record = traceRecords(dir).find((entry) => entry.event === "screenshot_evidence");
+    expect(record?.state).toBe("fresh");
+    expect(record?.found).toBe(1);
+  });
+
+  test("a one-file page is recorded, not chased", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omp-e2e-evidence-thin-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "index.html"), "<!doctype html><html><head><title>Atelier</title><meta name=\"description\" content=\"Handmade oak tables\"><link rel=\"icon\" href=\"data:,\"></head><body><h1>Atelier</h1><p>Handmade oak tables.</p></body></html>\n");
+    ageSources(dir);
+    host.fire("before_agent_start", { prompt: "Build a landing page for my studio.", systemPrompt: ["base"] }, { cwd: dir });
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(dir, "index.html"), future, future);
+
+    const result = host.fire("session_stop", { session_id: "evidence-thin", ...assistant("Shipped.") }, { cwd: dir });
+    expect(result).toBeUndefined();
+    expect(traceEvents(dir)).toContain("taste_review_passed");
+
+    // Recorded, because the absence is the finding; not chased, because one
+    // edited page is not a substantive frontend delivery.
+    const record = traceRecords(dir).find((entry) => entry.event === "screenshot_evidence");
+    expect(record?.state).toBe("missing");
+    expect(record?.found).toBe(0);
+  });
+
+  test("the doctor surfaces the last screenshot evidence", () => {
+    const dir = makeSubstantiveProject();
+    ageSources(dir);
+    host.fire("before_agent_start", { prompt: "Redesign the hero section of my workshop site.", systemPrompt: ["base"] }, { cwd: dir });
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(dir, "css", "style.css"), future, future);
+    host.fire("session_stop", { session_id: "evidence-doctor", ...assistant("Shipped.") }, { cwd: dir });
+
+    const handler = host.commandOptions.get("designer-doctor")?.handler as
+      | ((args: string, ctx: unknown) => void)
+      | undefined;
+    expect(handler).toBeDefined();
+    let report = "";
+    handler?.("", { cwd: dir, editor: { setText: (text: string) => { report = text; } }, ui: {} });
+    expect(report).toContain("Screenshot evidence (last session_stop): missing (captures: 0, stale: 0)");
   });
 });
 

@@ -161,6 +161,16 @@ warnings unless they produce an objective accessibility failure.
 `audit-data.mjs` validates CSV structure and contrast centrally so malformed
 reference rows fail package tests.
 
+At every frontend `session_stop` the trace also records `screenshot_evidence`:
+how many captures exist, how many predate the newest source edit, and a state of
+`fresh`, `stale`, `missing`, or `none`. A capture that does not exist cannot be
+evidence of a clean render, so the absence is recorded even when nothing is
+asked of the model. The `missing-screenshot-evidence` taste rule — a visual
+surface changed this session and the project holds no capture — fires only for
+substantive work (the same `filesScanned >= 3` bar that asks for `DESIGN.md` and
+`PRODUCT.md`), keeping the demand proportional to a real frontend delivery. The
+last state also appears in `/designer-doctor`.
+
 ## Evaluation
 
 `real-agent-eval.mjs` launches the actual `omp` CLI with a chosen model in an

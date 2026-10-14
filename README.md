@@ -128,7 +128,7 @@ detection, and one bounded plan-only continuation. They are not at parity:
 | Five-skill `resources_discover` | yes | yes |
 | Plan-intent detection + bounded plan-only continuation | yes | yes |
 | Post-execution delivery checks (quality/layout/build on `session_stop`) | yes | no |
-| Bounded taste review (slop rules, blank screenshot bands, optional visual reviewer) | yes | no |
+| Bounded taste review (slop rules, blank screenshot bands, screenshot-evidence record, optional visual reviewer) | yes | no |
 | Trace events under `~/.omp/agent/designer-traces` | yes | no |
 | Tool interception / skill-read hard gate | none | none |
 | MCP mutation | none | none |
