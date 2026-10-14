@@ -27,12 +27,13 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { redactSecrets } from "../shared/security.mjs";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
 import { claimFindings } from "../shared/delivery-claims.mjs";
 import { readDriverReport, summarizeDriver } from "../shared/driver-report.mjs";
 import { readCanvasIndex, writeCanvasFiles } from "../shared/design-canvas.mjs";
+import { formatCheckResult, summarizeCheck } from "../shared/designer-check.mjs";
 import { collectSkillUsage } from "../shared/skill-usage.mjs";
 import { resolveFlags, describeFlags } from "../shared/designer-flags.mjs";
 
@@ -330,7 +331,22 @@ interface ExtensionContext {
   cwd?: string;
 }
 
+/**
+ * The host surface, as read out of the omp binary (v18.10.4) rather than assumed.
+ * `ExtensionsApi` in the host carries more than this file used: `registerTool`,
+ * `registerFlag`/`getFlag`, `registerShortcut`, `registerMessageRenderer`,
+ * `registerFileWriteFallback`/`registerFileDeleteFallback`, `sendMessage`,
+ * `appendEntry`, `exec`, `getActiveTools`/`setActiveTools`, `setModel`,
+ * `getThinkingLevel`, `getSessionName`, `registerProvider`.
+ *
+ * Only `registerTool` is used here, and only when the host offers it: an older
+ * host, or the simulated one in the suites, simply does not get the tool. That is
+ * not a workflow gate (this extension still intercepts no tool calls); a tool is
+ * how the model asks for a check whose *result* carries the diagnostics, which is
+ * exactly what claude-code's ArtifactCheck does.
+ */
 interface ExtensionAPI {
+  registerTool?(definition: Record<string, unknown>): void;
   registerCommand(
     name: string,
     options: {
@@ -530,6 +546,9 @@ function mcpSummary(): string {
  */
 const evidenceByCwd = new Map<string, string>();
 
+/** Last `designer_check` result per working directory, for the doctor report. */
+const checkByCwd = new Map<string, string>();
+
 function recordScreenshotEvidence(
   cwd: string,
   sessionId: string,
@@ -626,6 +645,7 @@ function doctorReport(cwd: string): string {
     `Run skill (project): ${projectRunSkill(cwd) ?? "none"}`,
     `Driver: ${existsSync(join(SCRIPTS_ROOT, "designer-driver.mjs")) ? "present" : "missing"}`,
     `Canvas: ${describeCanvas(cwd)}`,
+    `Designer check (last call): ${checkByCwd.get(cwd) ?? "never run"}`,
     `Skill context: ${describeSkillContext()}`,
     describeFlags(resolveFlags({ cwd })),
     "",
@@ -1228,6 +1248,63 @@ export default function designerExtension(pi: ExtensionAPI): void {
       ctx.editor?.setText?.("");
     },
   });
+
+  // The model-callable check. cc's ArtifactCheck returns its field list *in the
+  // tool result*, while the work is still open; the stop-time record can only
+  // tell the model afterwards. Same diagnostics, right moment.
+  if (typeof pi.registerTool === "function") {
+    pi.registerTool({
+      name: "designer_check",
+      label: "Designer Check",
+      description: [
+        "Render the project's page and report what it actually looks like: full-page captures at 1440 and 375,",
+        "console and page errors, failed requests, blank captures, content running past the viewport, and text",
+        "under 3:1 contrast measured on the live DOM. Call this before claiming a page works, and again after",
+        "fixing what it reports. It writes screenshots/ and screenshots/driver-report.json beside the project.",
+      ].join(" "),
+      approval: () => "exec",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "What to open. Defaults to the project dev server on localhost:5173, or a file:// URL for a static page." },
+          start: { type: "string", description: "Command that serves the app (for example `npm run dev`). Omit when the app is already running." },
+          out: { type: "string", description: "Capture directory, relative to the project. Defaults to `screenshots`." },
+          project: { type: "string", description: "Project root. Defaults to the session directory." },
+        },
+        additionalProperties: false,
+      },
+      async execute(...args: unknown[]) {
+        const input = asRecord(args[0]);
+        const context = asRecord(args.at(-1));
+        const cwd = typeof context.cwd === "string" && context.cwd ? context.cwd : process.cwd();
+        const project = typeof input.project === "string" && input.project ? resolve(input.project) : cwd;
+        const out = typeof input.out === "string" && input.out ? input.out : "screenshots";
+        const url = typeof input.url === "string" && input.url
+          ? input.url
+          : existsSync(join(project, "index.html"))
+            ? pathToFileURL(join(project, "index.html")).href
+            : "http://localhost:5173";
+
+        const driverArgs = [join(SCRIPTS_ROOT, "designer-driver.mjs"), "--project", project, "--out", out, "--url", url];
+        if (typeof input.start === "string" && input.start) driverArgs.push("--start", input.start);
+        const run = spawnSync(process.execPath, driverArgs, {
+          cwd: project,
+          encoding: "utf8",
+          timeout: 180_000,
+        });
+        const reported = readDriverReport(project)?.report ?? null;
+        const formatted = formatCheckResult(reported, { url, project, exitCode: run.status });
+        checkByCwd.set(cwd, summarizeCheck(reported));
+        writeTrace(cwd, "designer_check", {
+          ok: formatted.ok,
+          failures: formatted.counts.failures,
+          warnings: formatted.counts.warnings,
+          exitCode: run.status,
+        });
+        return { content: [{ type: "text", text: formatted.text }] };
+      },
+    });
+  }
 
   pi.registerCommand("designer-canvas", {
     description: "Rebuild the project design canvas (every board and capture on one page) and report its path",

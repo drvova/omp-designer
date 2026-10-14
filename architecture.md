@@ -172,6 +172,14 @@ freshest captures — including a failed run, where seeing the broken board is t
 point. A board name is escaped in both the markup and the embedded index, because
 a filename is not trusted input.
 
+`designer_check` is the tool form of the same check: registered through the host's
+`registerTool` (present in omp's `ExtensionsApi`, read out of the binary rather than
+assumed), it runs the driver and returns the field list in its **tool result** — so
+the model can read the overflow, the contrast findings and the console errors while
+the work is still open, instead of only at `session_stop`. The tool is registered
+only when the host offers `registerTool`, so a host without it keeps working; the
+extension still intercepts no tool calls.
+
 The stop-time evidence record reads that report, so the record can say
 `driver: ok (2 captures, 0 console errors)` rather than only counting captures,
 and `/designer-doctor` prints the project's run skill and whether the driver is

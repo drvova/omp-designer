@@ -155,6 +155,7 @@ detection, and one bounded plan-only continuation. They are not at parity:
 | Contract assembled per turn (four flag-gated fragments: motion, dataviz, forms, verify) | yes | no |
 | Browser driver (`designer-driver.mjs`: 1440 + 375 captures, console errors, driver report) | yes | no |
 | Design canvas (`designer-canvas.html`: boards + captures on one page, cc-shaped `canvas.json`) | yes | no |
+| `designer_check` tool (driver diagnostics returned in the tool result, mid-turn) | yes | no |
 | Trace events under `~/.omp/agent/designer-traces` | yes | no |
 | Tool interception / skill-read hard gate | none | none |
 | MCP mutation | none | none |

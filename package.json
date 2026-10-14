@@ -79,7 +79,7 @@
     "test:cleanup": "node scripts/__tests__/cleanup-artifacts.test.mjs",
     "cleanup:artifacts": "node scripts/cleanup-artifacts.mjs",
     "test:security": "node scripts/__tests__/security.test.mjs",
-    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:claims && npm run test:driver-report && npm run test:canvas && npm run test:link && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
+    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:claims && npm run test:driver-report && npm run test:canvas && npm run test:designer-check && npm run test:link && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
     "e2e:smoke": "bun scripts/e2e-smoke.mjs",
     "test:real": "node scripts/real-agent-eval.mjs",
     "test:real:suite": "node scripts/real-agent-eval.mjs --suite",
@@ -98,7 +98,8 @@
     "check:link": "node scripts/check-plugin-link.mjs",
     "test:driver-report": "node scripts/__tests__/driver-report.test.mjs",
     "test:link": "node scripts/__tests__/plugin-link.test.mjs",
-    "test:canvas": "node scripts/__tests__/design-canvas.test.mjs"
+    "test:canvas": "node scripts/__tests__/design-canvas.test.mjs",
+    "test:designer-check": "node scripts/__tests__/designer-check.test.mjs"
   },
   "engines": {
     "node": ">=20.19.0"

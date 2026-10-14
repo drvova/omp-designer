@@ -52,11 +52,15 @@ type Handler = (event?: unknown, ctx?: { cwd?: string }) => unknown;
 function makeHost() {
   const commands: string[] = [];
   const commandOptions = new Map<string, Record<string, unknown>>();
+  const tools: Array<Record<string, unknown>> = [];
   const handlers = new Map<string, Handler[]>();
   const api = {
     registerCommand(name: string, options: unknown) {
       commands.push(name);
       commandOptions.set(name, options as Record<string, unknown>);
+    },
+    registerTool(definition: unknown) {
+      tools.push(definition as Record<string, unknown>);
     },
     on(event: string, handler: Handler) {
       const entries = handlers.get(event) ?? [];
@@ -68,7 +72,7 @@ function makeHost() {
     if (ctx?.cwd) traceCwds.add(ctx.cwd);
     return handlers.get(event)?.[0]?.(payload, ctx);
   };
-  return { commands, commandOptions, handlers, api, fire };
+  return { commands, commandOptions, tools, handlers, api, fire };
 }
 
 function makeTempProject(withBuildScript: boolean): string {
@@ -582,6 +586,39 @@ describe("P2: duplicate load and loader realms", () => {
     realm2.default(host2.api as never);
     expect(host2.commands).toHaveLength(0);
     expect(host2.handlers.size).toBe(0);
+  });
+});
+
+describe("P2: designer_check (the tool the model calls)", () => {
+  test("registers one tool with a JSON-Schema parameter object", () => {
+    expect(host.tools).toHaveLength(1);
+    const tool = host.tools[0];
+    expect(tool.name).toBe("designer_check");
+    expect(String(tool.description)).toMatch(/captures at 1440 and 375/);
+    const parameters = tool.parameters as { type?: string; properties?: Record<string, unknown>; additionalProperties?: boolean };
+    expect(parameters.type).toBe("object");
+    expect(Object.keys(parameters.properties ?? {}).sort()).toEqual(["out", "project", "start", "url"]);
+    expect(parameters.additionalProperties).toBe(false);
+    expect(typeof tool.execute).toBe("function");
+  });
+
+  test("its result carries the field list, and a run that could not happen says so", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omp-e2e-check-"));
+    tempDirs.push(dir);
+    traceCwds.add(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "check-fixture", private: true }));
+    writeFileSync(join(dir, "index.html"), "<!doctype html><html><body><h1>Check</h1></body></html>\n");
+    const execute = host.tools[0].execute as (input: unknown, ...rest: unknown[]) => Promise<{ content: Array<{ type: string; text: string }> }>;
+    // No Playwright in the fixture, and none resolvable from the package here, so
+    // the driver exits with a report saying exactly that — which is the point:
+    // a check that could not run is never reported as a page that looked fine.
+    return execute({ project: dir, url: "http://localhost:5173" }, { cwd: dir }).then((result) => {
+      const text = result.content[0].text;
+      expect(result.content[0].type).toBe("text");
+      expect(text).toMatch(/Rendered page: FAILED/);
+      expect(text).toMatch(/playwright-unavailable|did not answer|url-unreachable/);
+      expect(traceEvents(dir)).toContain("designer_check");
+    });
   });
 });
 
