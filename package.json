@@ -2,7 +2,7 @@
   "name": "omp-designer",
   "version": "5.1.0",
   "type": "module",
-  "description": "Focused UI/UX workflow for Pi and oh-my-pi with 7 skills, 4 conditional contract fragments, evidence-aware checks, and browser-first review.",
+  "description": "Focused UI/UX workflow for Pi and oh-my-pi with 8 skills, 4 conditional contract fragments, evidence-aware checks, and browser-first review.",
   "keywords": [
     "pi-package",
     "pi",

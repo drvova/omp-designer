@@ -128,6 +128,7 @@ const DESIGNER_SKILLS = Object.freeze([
   { name: "review-skill", file: join(SKILLS_ROOT, "review-skill.md"), role: "review" },
   { name: "run", file: join(SKILLS_ROOT, "run.md"), role: "drive" },
   { name: "run-skill-generator", file: join(SKILLS_ROOT, "run-skill-generator.md"), role: "drive-authoring" },
+  { name: "dataviz", file: join(SKILLS_ROOT, "dataviz.md"), role: "data-display" },
 ]);
 
 const DESIGNER_MCP_NAMES = new Set([
@@ -244,7 +245,7 @@ const PLAN_ONLY_PROMPT = DESIGNER_PROMPT
  */
 const CONTRACT_FRAGMENTS: Record<string, string> = {
   motion: `\n\n## Motion is in scope for this request\nRead ${join(SKILLS_ROOT, "animate.md")} before writing transitions. One orchestrated moment beats scattered effects; reduced motion and a no-JS load must still show every section.`,
-  dataviz: `\n\n## Charts or numbers are in scope for this request\nDraw marks, ticks, and labels on one scale and label only values the data actually reaches. Take chart text from the theme tokens so both themes read. A chart that decorates or exaggerates is a failure, not a flourish.`,
+  dataviz: `\n\n## Charts or numbers are in scope for this request\nRead ${join(SKILLS_ROOT, "dataviz.md")} before drawing anything, and take the form from the data rather than from taste. One scale per chart, every label naming a value the data reaches, chart text from the theme tokens, semantic colors kept separate from the accent. A chart that decorates or exaggerates is a failure, not a flourish.`,
   forms: `\n\n## Interactive input is in scope for this request\nGive every control a stable id and a visible focus state, and route submissions to a real destination. Never simulate success: an in-page confirmation that delivers nothing is a false claim about the product.`,
   verify: `\n\n## Seeing it work is in scope for this request\nRead ${join(SKILLS_ROOT, "run.md")} before claiming anything about the rendered page. Launch the real app and drive it: a project run skill (\`.omp/skills/run-*/SKILL.md\`) if one exists, otherwise \`node ${join(SCRIPTS_ROOT, "designer-driver.mjs")} --start "<the project's start command>" --url <url>\`, which captures 1440 and 375, collects console errors, and writes \`screenshots/driver-report.json\`. Look at the captures. If launching took real work, generate a run skill with ${join(SKILLS_ROOT, "run-skill-generator.md")} instead of rediscovering it next time. The run leaves a canvas beside the captures (\`designer-canvas.html\`, rebuilt by \`node ${join(SCRIPTS_ROOT, "designer-canvas.mjs")}\`) showing every board and capture at once. A blank frame is a failure to launch, and a page you never opened has no result to report.`,
 };

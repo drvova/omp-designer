@@ -318,10 +318,34 @@ a finished page is not.
   stack cannot solve simply.
 - A generic scroll-reveal is not a reason to install a motion library.
 
+### Tokens, themes, and neutrals
+
+- Define the token set once, at the top of the stylesheet, as custom properties:
+  4-6 named colors, two or more type roles (a display face used with restraint, a
+  body face, and a utility face for captions or data), and a spacing/radius scale —
+  with a one-line comment naming the layout concept. Derive every color and type
+  decision from those tokens. A hex or font family outside the block is drift.
+  DESIGN.md explains the direction; the token block is what the code obeys.
+- Choose neutrals deliberately. A pure mid-grey reads unconsidered; a grey with a
+  slight hue bias toward the accent reads intentional. Light or dark is a decision
+  you make from the subject, not a default you inherit.
+- If the project supports a theme toggle, structure the CSS for all three states:
+  the bare `:root` block is the complete light palette;
+  `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])` redefines
+  only the tokens, so an explicit light choice still wins; `:root[data-theme="dark"]`
+  mirrors them for an explicit choice. A theme that only works once the attribute is
+  set is broken for every reader on the system default.
+- Make structural devices (numbering, eyebrows, dividers, labels) encode something
+  true about the content. Numbered markers fit a real sequence — a process, a typed
+  timeline — not a decorative rhythm.
+
 ## 6. Copy
 
 Write concrete copy for one identifiable audience.
 
+- Name the page like a product, not a caption: the title is the thing's name, a
+  short noun phrase (or the question the page exists to answer). A title that adds
+  its own explanation after a dash or colon reads as generated filler.
 - Prefer nouns and verbs over promotional adjectives.
 - Keep headlines and calls to action specific to their destination.
 - Avoid unsupported superlatives and vague claims.

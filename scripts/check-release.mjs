@@ -11,7 +11,7 @@ import { runCommand } from "./lifecycle-lib.mjs";
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const failures = [];
-const expectedSkills = ["animate.md", "design-md.md", "designer-master.md", "expression.md", "review-skill.md", "run.md", "run-skill-generator.md"];
+const expectedSkills = ["animate.md", "design-md.md", "designer-master.md", "expression.md", "review-skill.md", "run.md", "run-skill-generator.md", "dataviz.md"];
 const requiredFiles = [
   "extension/index.ts",
   "extensions/designer.ts",

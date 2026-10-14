@@ -133,9 +133,9 @@ describe("P2: OMP hook registration", () => {
     expect(host.handlers.has("tool_result")).toBe(false);
   });
 
-  test("resources_discover exposes exactly the seven skill resources", () => {
+  test("resources_discover exposes exactly the eight skill resources", () => {
     const result = host.fire("resources_discover", {}, { cwd: process.cwd() }) as { skillPaths: string[] };
-    expect(result.skillPaths).toHaveLength(7);
+    expect(result.skillPaths).toHaveLength(8);
     expect(result.skillPaths.every((p) => p.startsWith(omp.PACKAGE_ROOT) && p.endsWith(".md"))).toBe(true);
   });
 
@@ -498,7 +498,7 @@ describe("P2: taste-review bridge", () => {
     expect(report).toContain("Driver: present");
     expect(report).toContain("Run skill (project): none");
     expect(report).toContain("Canvas: none");
-    expect(report).toMatch(/Skill context: 7 files, [\d.]+KB if all were read/);
+    expect(report).toMatch(/Skill context: 8 files, [\d.]+KB if all were read/);
   });
 
   test("the /designer-canvas command builds the sheet and the doctor sees it", () => {
