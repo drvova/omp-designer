@@ -101,6 +101,42 @@ No skill-read order is technically enforced. Prompt contract tests protect the
 important behavior: immediate-build requests do not trigger questionnaires, small
 edits remain proportional, and MCP use is optional.
 
+Each skill's frontmatter carries a `when_to_use` trigger next to its
+description; the description remains what the host surfaces in discovery, so the
+trigger is documentation for readers and hosts that render it.
+
+Skill reads are measured, never enforced. `shared/skill-usage.mjs` parses the
+session transcript at `session_stop` and records, per skill, how often it was
+named and whether a distinctive passage of its own body appears. A filename
+mention is not a read, and a transcript that cannot be located reports a reason
+rather than a clean result. The line lands in the trace (`skill_usage`) and in
+`/designer-doctor`.
+
+## Contract assembly
+
+The contract is assembled per turn, not injected as one frozen block.
+`buildContract({ planOnly, fragments, vibe })` composes the base contract with
+zero or more conditional fragments and the owner-preference section; a turn that
+earns none gets the default bytes exactly, which
+`scripts/__tests__/fixtures/contract-v5.1-*.txt` pin.
+
+The fragments are `motion`, `dataviz`, and `forms`. A fragment appears when the
+request words or an installed dependency put that concern in scope, and a flag of
+`false` suppresses it regardless of the request. Flags resolve in this order:
+`OMP_DESIGNER_FLAGS` (JSON in the environment), then `.omp/designer-flags.json`
+in the working directory, then the defaults (all on). A missing file, unreadable
+file, malformed JSON, unknown key, or wrong value type falls back to the default,
+so a typo in a flag file cannot change behaviour silently or take the workflow
+down. `/designer-doctor` prints the effective flags and their sources.
+
+`## Delivery checks` is a named constant, so the plan-only variant removes the
+block by identity instead of by a regex that quietly stops matching when the
+wording changes. Each check records a status (`pass`, `fail`, `not-measured`);
+the verdict stays pass/fail because every check this runtime runs marks itself
+skipped only when it cannot apply. The not-measured list is recorded anyway, and
+the contract instructs the model to report anything it could not run itself
+rather than implying the page was verified.
+
 ## MCP boundary
 
 The extension reads MCP configuration only for the doctor summary. Server

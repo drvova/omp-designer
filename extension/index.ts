@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import { redactSecrets } from "../shared/security.mjs";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
 import { collectSkillUsage } from "../shared/skill-usage.mjs";
+import { resolveFlags, describeFlags } from "../shared/designer-flags.mjs";
 
 const HOME = homedir();
 const MODULE_FILE = fileURLToPath(import.meta.url);
@@ -73,6 +74,23 @@ const DESIGNER_MCP_NAMES = new Set([
 ]);
 
 const PROMPT_MARKER_RE = /\n?\[DESIGNER MODE: ACTIVE v5\][\s\S]*?\[\/DESIGNER MODE\]\n?/g;
+
+/**
+ * The delivery-checks block, named so the plan-only variant removes it by
+ * identity rather than by a regex that silently stops matching when the
+ * wording changes.
+ */
+const DELIVERY_CHECKS_SECTION = `## Delivery checks
+
+For substantive frontend work, run:
+1. node ${QUALITY_SCRIPT} --check .
+2. node ${LAYOUT_SCRIPT} .
+3. the project's build command
+4. browser QA at a narrow and wide viewport
+5. open the saved full-page screenshots and look at them: blank bands mean broken reveal behavior — fix it and recapture before delivery
+
+Warnings are review input. Only true blockers should prevent delivery. Report commands actually run and unresolved limitations accurately. A check you could not run is not a pass: say it was not measured and why, instead of implying the page was verified — a static site has no build result, and a page you never opened has no browser result.
+The checks only police honesty and function — never boldness. Do not design defensively to satisfy them.`;
 
 const DESIGNER_PROMPT = `[DESIGNER MODE: ACTIVE v5]
 
@@ -139,17 +157,7 @@ Palette/typography data (optional index): ${join(DATA_ROOT, "colors.csv")} and $
 - A landing page answers the visitor's whole question chain — what it is, how it works, what it looks like in use, concrete details, practicalities, action. A vague brief deserves the fuller story; a tight brief can be complete sooner. Never pad.
 - Full build guidance: designer-master.md and design-md.md.
 
-## Delivery checks
-
-For substantive frontend work, run:
-1. node ${QUALITY_SCRIPT} --check .
-2. node ${LAYOUT_SCRIPT} .
-3. the project's build command
-4. browser QA at a narrow and wide viewport
-5. open the saved full-page screenshots and look at them: blank bands mean broken reveal behavior — fix it and recapture before delivery
-
-Warnings are review input. Only true blockers should prevent delivery. Report commands actually run and unresolved limitations accurately.
-The checks only police honesty and function — never boldness. Do not design defensively to satisfy them.
+${DELIVERY_CHECKS_SECTION}
 
 [/DESIGNER MODE]`;
 
@@ -158,10 +166,86 @@ const PLAN_ONLY_PROMPT = DESIGNER_PROMPT
     `8. Read ${join(SKILLS_ROOT, "review-skill.md")} before delivery and perform the proportional review it describes.`,
     "8. Do not read or execute the delivery-review skill during this plan-only turn.",
   )
-  .replace(
-    /## Delivery checks[\s\S]*?\n\nWarnings are review input\. Only true blockers should prevent delivery\. Report commands actually run and unresolved limitations accurately\.\nThe checks only police honesty and function — never boldness\. Do not design defensively to satisfy them\.\n/,
-    "",
-  );
+  .replace(`${DELIVERY_CHECKS_SECTION}\n\n`, "");
+
+/**
+ * Conditional contract fragments, injected per turn.
+ *
+ * The claude-code harness composes its page contract at call time instead of
+ * shipping one frozen block: a fragment appears only when the request calls for
+ * it and the tenant's flag allows it. The equivalent here is one short,
+ * additive section per in-scope concern, each naming the sibling skill to read
+ * and the failure it prevents. A turn that triggers none gets the base contract
+ * byte-for-byte.
+ */
+const CONTRACT_FRAGMENTS: Record<string, string> = {
+  motion: `\n\n## Motion is in scope for this request\nRead ${join(SKILLS_ROOT, "animate.md")} before writing transitions. One orchestrated moment beats scattered effects; reduced motion and a no-JS load must still show every section.`,
+  dataviz: `\n\n## Charts or numbers are in scope for this request\nDraw marks, ticks, and labels on one scale and label only values the data actually reaches. Take chart text from the theme tokens so both themes read. A chart that decorates or exaggerates is a failure, not a flourish.`,
+  forms: `\n\n## Interactive input is in scope for this request\nGive every control a stable id and a visible focus state, and route submissions to a real destination. Never simulate success: an in-page confirmation that delivers nothing is a false claim about the product.`,
+};
+
+// Request words that put a concern in scope, and the dependencies that prove it
+// is already part of the project.
+const MOTION_REQUEST_RE = /\b(animat\w*|motion|transition\w*|scroll[- ]?(?:reveal|driven|linked)|parallax|micro[- ]?interaction\w*|gsap|framer|lottie)\b/i;
+const DATAVIZ_REQUEST_RE = /\b(chart\w*|graph\w*|plot\w*|dashboard\w*|metric\w*|analytics|data ?viz\w*|sparkline\w*|kpi\w*|stats?)\b/i;
+const FORMS_REQUEST_RE = /\b(form\w*|sign ?up|newsletter|checkout|contact|login|sign[- ]?in|input\w*|onboard\w*|waitlist)\b/i;
+const MOTION_DEPENDENCIES = new Set([
+  "framer-motion", "motion", "motion-v", "gsap", "animejs", "auto-animate", "lenis",
+  "lottie-react", "lottie-web", "@react-spring/web", "@vueuse/motion", "@formkit/auto-animate",
+]);
+const DATAVIZ_DEPENDENCIES = new Set([
+  "recharts", "chart.js", "d3", "echarts", "apexcharts", "victory", "plotly.js",
+  "lightweight-charts", "@nivo/core", "@visx/shape", "highcharts", "chartist",
+]);
+
+function projectDependencies(cwd: string): Set<string> {
+  const names = new Set<string>();
+  try {
+    const parsed = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as Record<string, unknown>;
+    for (const field of ["dependencies", "devDependencies"]) {
+      for (const name of Object.keys(asRecord(parsed[field]))) names.add(name);
+    }
+  } catch {
+    // No manifest, no dependency signal. The request words still decide.
+  }
+  return names;
+}
+
+/**
+ * Which fragments this turn earns. A flag of `false` suppresses its fragment
+ * regardless of the request; otherwise the request words or an installed
+ * dependency put the concern in scope.
+ */
+function fragmentNamesFor(userPrompt: string, cwd: string, flags: Record<string, boolean>): string[] {
+  const names: string[] = [];
+  const dependencies = projectDependencies(cwd);
+  const has = (set: Set<string>): boolean => [...dependencies].some((name) => set.has(name));
+  if (flags.motion && (MOTION_REQUEST_RE.test(userPrompt) || has(MOTION_DEPENDENCIES))) names.push("motion");
+  if (flags.dataviz && (DATAVIZ_REQUEST_RE.test(userPrompt) || has(DATAVIZ_DEPENDENCIES))) names.push("dataviz");
+  if (flags.forms && FORMS_REQUEST_RE.test(userPrompt)) names.push("forms");
+  return names;
+}
+
+/**
+ * Assemble the contract for one turn.
+ *
+ * `buildContract()` with no arguments returns the frozen default contract, which
+ * is what every existing consumer and contract check sees; fragments and the
+ * owner-preference section are appended at the same anchor the marker strip uses,
+ * so a turn with neither is byte-identical to the default.
+ */
+function buildContract({ planOnly = false, fragments = [], vibe = "" }: { planOnly?: boolean; fragments?: string[]; vibe?: string } = {}): string {
+  const base = planOnly ? PLAN_ONLY_PROMPT : DESIGNER_PROMPT;
+  // Order comes from the declared fragment table, not from the caller, so a
+  // future caller cannot reshuffle the contract. Unknown names drop out.
+  const declarOrder = Object.keys(CONTRACT_FRAGMENTS);
+  const extra = [
+    ...declarOrder.filter((name) => fragments.includes(name)).map((name) => CONTRACT_FRAGMENTS[name]),
+    vibe,
+  ].filter(Boolean);
+  if (extra.length === 0) return base;
+  return base.replace(/\n\[\/DESIGNER MODE\]$/, `${extra.join("")}\n\n[/DESIGNER MODE]`);
+}
 
 interface CommandContext {
   cwd?: string;
@@ -390,6 +474,7 @@ function doctorReport(cwd: string): string {
     `Palette data: ${existsSync(join(DATA_ROOT, "colors.csv")) ? "present" : "missing"}`,
     `MCPs: ${mcpSummary()}`,
     `Skill usage (last session_stop): ${skillUsageByCwd.get(cwd) ?? "not measured yet"}`,
+    describeFlags(resolveFlags({ cwd })),
     "",
     ...skills,
     "",
@@ -448,6 +533,22 @@ interface CheckResult {
   ok: boolean;
   skipped?: string;
   output: string;
+}
+
+type CheckStatus = "pass" | "fail" | "not-measured";
+
+/**
+ * A check that could not run is not a pass.
+ *
+ * `skipped` checks used to be indistinguishable from passing ones: the report
+ * said delivery_checks_passed while a validator or the build never executed,
+ * which is the same false-green the Artifact tool's own text forbids ("an empty
+ * result can mean no viewer has loaded the version yet, which is NOT evidence of
+ * a clean render"). Status keeps the three outcomes apart.
+ */
+function checkStatus(check: CheckResult): CheckStatus {
+  if (check.skipped) return "not-measured";
+  return check.ok ? "pass" : "fail";
 }
 
 interface PlanCheckResult {
@@ -959,15 +1060,21 @@ export default function designerExtension(pi: ExtensionAPI): void {
       sessionStartByCwd.set(cwd, Date.now());
       sessionTokenByCwd.set(cwd, `${Date.now()}-${++sessionCounter}`);
     }
-    const base = asksForApprovalPlan(userPrompt) ? PLAN_ONLY_PROMPT : DESIGNER_PROMPT;
+    const planOnly = asksForApprovalPlan(userPrompt);
+    // Flags are read per turn so a project can change them without a restart,
+    // and so a malformed flag file can only ever fall back to defaults.
+    const { flags, sources: flagSources, ignored: flagsIgnored } = resolveFlags({ cwd });
+    const fragments = fragmentNamesFor(userPrompt, cwd, flags);
     // The vibe lives inside the prompt markers so re-injection strips it too.
-    const vibe = vibeSection(cwd);
-    const prompt = vibe ? base.replace(/\n\[\/DESIGNER MODE\]$/, `${vibe}\n\n[/DESIGNER MODE]`) : base;
+    const prompt = buildContract({ planOnly, fragments, vibe: vibeSection(cwd) });
     const prompts = stripDesignerPrompt(normalizeSystemPrompt(asRecord(event).systemPrompt));
     writeTrace(cwd, "prompt_injected", {
       version: 5,
       promptChars: prompt.length,
-      mode: prompt === PLAN_ONLY_PROMPT ? "plan" : "build",
+      mode: planOnly ? "plan" : "build",
+      fragments,
+      flagSources,
+      flagsIgnored,
     });
     return { systemPrompt: [...prompts, prompt] };
   });
@@ -1031,11 +1138,25 @@ export default function designerExtension(pi: ExtensionAPI): void {
     validationAttempts.set(sessionId, attempt);
 
     const checks = deliveryChecks(cwd, userFactsByCwd.get(cwd) ?? "");
-    const failures = checks.filter((check) => !check.ok);
+    // Verdict stays pass/fail: every check this runtime runs marks itself
+    // skipped only when it cannot apply (no build system, not a frontend
+    // project), so a skip here is inapplicable rather than a missing
+    // measurement. The per-check status and the notMeasured list are recorded
+    // anyway, which is what makes a skip visible instead of silent, and the
+    // contract tells the model to report anything it could not run itself.
+    const failures = checks.filter((check) => checkStatus(check) === "fail");
     writeTrace(cwd, failures.length === 0 ? "delivery_checks_passed" : "delivery_checks_failed", {
       sessionId,
       attempt,
-      checks: checks.map(({ name, ok, skipped }) => ({ name, ok, skipped })),
+      checks: checks.map((check) => ({
+        name: check.name,
+        ok: check.ok,
+        skipped: check.skipped,
+        status: checkStatus(check),
+      })),
+      notMeasured: checks
+        .filter((check) => checkStatus(check) === "not-measured")
+        .map((check) => `${check.name}: ${check.skipped ?? "not measured"}`),
     });
 
     if (failures.length === 0) {
@@ -1098,7 +1219,11 @@ export default function designerExtension(pi: ExtensionAPI): void {
 }
 
 export {
+  CONTRACT_FRAGMENTS,
+  checkStatus,
   DATA_ROOT,
+  buildContract,
+  fragmentNamesFor,
   DESIGNER_PROMPT,
   DESIGNER_SKILLS,
   PLAN_ONLY_PROMPT,

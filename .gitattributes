@@ -1,0 +1,3 @@
+# Golden contract fixtures must stay LF: the contract literal is built with LF,
+# so an autocrlf checkout must not rewrite them into a CRLF mismatch.
+scripts/__tests__/fixtures/*.txt text eol=lf
