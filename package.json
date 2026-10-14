@@ -47,6 +47,7 @@
     "scripts/audit-data.mjs",
     "scripts/audit-trace.mjs",
     "scripts/check-release.mjs",
+    "scripts/build-architecture-figure.mjs",
     "scripts/gate.mjs",
     "scripts/fix-ai-slop.mjs",
     "scripts/install-local.mjs",

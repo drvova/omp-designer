@@ -21,6 +21,8 @@ const installation = read("docs/installation.md");
 const parity = read("docs/cc-parity.md");
 const evalDoc = read("docs/eval.md");
 const workshopDoc = read("docs/workshop.md");
+const plateDark = read("docs/architecture.svg");
+const plateLight = read("docs/architecture-light.svg");
 
 const checks = [
   ["package ships the shared core (incl. security.mjs)", pkg.files.some((f) => f === "shared/security.mjs" || f === "shared/" || f === "shared")],
@@ -63,6 +65,15 @@ const checks = [
   ["README points at the eval doc", /docs\/eval\.md/.test(readme)],
   ["parity doc cites the extracts and marks the gaps", /cc-2296|claude\.js/.test(parity) && /not portable/.test(parity) && /artifact-design/.test(parity)],
   ["architecture skills table lists four skills", /designer-master[\s\S]*design-md[\s\S]*animate[\s\S]*review-skill/i.test(architecture)],
+
+  // The architecture plate: a real figure, both themes, kept in step with the README.
+  ["both architecture plates are valid standalone SVG", [plateDark, plateLight].every((plate) =>
+    /^<svg[\s\S]*viewBox="0 0 \d+ \d+"/.test(plate) && plate.trimEnd().endsWith("</svg>") &&
+    /role="img"/.test(plate) && /aria-label="[^"]{20,}"/.test(plate) && !/<script/i.test(plate))],
+  ["the two plates are different files for the same figure", plateDark !== plateLight && /data-theme="dark"/.test(plateDark) && /data-theme="light"/.test(plateLight)],
+  ["the README embeds the plates for both colour schemes", /<picture>/.test(readme) && /prefers-color-scheme: dark[\s\S]{0,120}architecture\.svg/.test(readme) && /architecture-light\.svg/.test(readme)],
+  ["the README alt text describes the drawing", /alt="[^"]{120,}"/.test(readme)],
+  ["the README names the generator", /build-architecture-figure\.mjs/.test(readme)],
 
   // Secret hygiene.
   // The way back is a loop: the page posts, the project records, the turn is told.
