@@ -497,6 +497,29 @@ describe("P2: taste-review bridge", () => {
     expect(report).toContain("Screenshot evidence (last session_stop): missing (captures: 0, stale: 0)");
     expect(report).toContain("Driver: present");
     expect(report).toContain("Run skill (project): none");
+    expect(report).toContain("Canvas: none");
+    expect(report).toMatch(/Skill context: 7 files, [\d.]+KB if all were read/);
+  });
+
+  test("the /designer-canvas command builds the sheet and the doctor sees it", () => {
+    const dir = makeSubstantiveProject();
+    mkdirSync(join(dir, "screenshots"), { recursive: true });
+    writeFileSync(join(dir, "screenshots", "desktop-1440.png"), solidPng(100, 150));
+    const handler = host.commandOptions.get("designer-canvas")?.handler as
+      | ((args: string, ctx: unknown) => void)
+      | undefined;
+    expect(handler).toBeDefined();
+    const notices: string[] = [];
+    handler?.("", { cwd: dir, ui: { notify: (text: string) => notices.push(text) }, editor: { setText: () => {} } });
+    expect(notices.join(" ")).toMatch(/Canvas: 1 board ->/);
+    expect(existsSync(join(dir, "designer-canvas.html"))).toBe(true);
+
+    const doctor = host.commandOptions.get("designer-doctor")?.handler as
+      | ((args: string, ctx: unknown) => void)
+      | undefined;
+    let report = "";
+    doctor?.("", { cwd: dir, editor: { setText: (text: string) => { report = text; } }, ui: {} });
+    expect(report).toMatch(/Canvas: 1 board, (just built|built \d+m ago)/);
   });
 
   test("a driver run reaches the record, and its failures are reported as failures", () => {

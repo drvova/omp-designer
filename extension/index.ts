@@ -563,6 +563,29 @@ function projectRunSkill(cwd: string): string | null {
   return null;
 }
 
+/**
+ * What the skill set costs if everything were read, and which file dominates it.
+ *
+ * cc's `/skill-doctor` reports skill usage alongside context cost, and the number
+ * matters here for the same reason: the injected contract is a few KB, while the
+ * skills are a ceiling that is only paid for the ones a turn actually reads.
+ */
+function describeSkillContext(): string {
+  const measured: Array<{ name: string; bytes: number }> = [];
+  for (const skill of DESIGNER_SKILLS) {
+    try {
+      measured.push({ name: skill.name, bytes: statSync(skill.file).size });
+    } catch {
+      // A missing skill shows up in the per-skill list below; it costs nothing here.
+    }
+  }
+  if (measured.length === 0) return "no skill files readable";
+  const total = measured.reduce((sum, entry) => sum + entry.bytes, 0);
+  const largest = [...measured].sort((left, right) => right.bytes - left.bytes)[0];
+  const kb = (bytes: number): string => `${Math.round(bytes / 102.4) / 10}KB`;
+  return `${measured.length} files, ${kb(total)} if all were read; largest ${largest.name} ${kb(largest.bytes)} — only a turn's own skill is required`;
+}
+
 /** One doctor line for the last canvas build. */
 function describeCanvas(cwd: string): string {
   const canvas = readCanvasIndex(cwd);
@@ -602,6 +625,7 @@ function doctorReport(cwd: string): string {
     `Run skill (project): ${projectRunSkill(cwd) ?? "none"}`,
     `Driver: ${existsSync(join(SCRIPTS_ROOT, "designer-driver.mjs")) ? "present" : "missing"}`,
     `Canvas: ${describeCanvas(cwd)}`,
+    `Skill context: ${describeSkillContext()}`,
     describeFlags(resolveFlags({ cwd })),
     "",
     ...skills,

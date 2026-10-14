@@ -216,7 +216,10 @@ asked of the model. The `missing-screenshot-evidence` taste rule — a visual
 surface changed this session and the project holds no capture — fires only for
 substantive work (the same `filesScanned >= 3` bar that asks for `DESIGN.md` and
 `PRODUCT.md`), keeping the demand proportional to a real frontend delivery. The
-last state also appears in `/designer-doctor`.
+last state also appears in `/designer-doctor`, next to the skill set's context
+cost (`7 files, 49KB if all were read; largest designer-master 17KB`): the
+contract is a few KB per turn, and the skills are a ceiling paid only for the ones
+a turn actually opens.
 
 ## Evaluation
 
