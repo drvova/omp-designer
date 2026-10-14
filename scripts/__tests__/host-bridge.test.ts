@@ -133,9 +133,9 @@ describe("P2: OMP hook registration", () => {
     expect(host.handlers.has("tool_result")).toBe(false);
   });
 
-  test("resources_discover exposes exactly the five skill resources", () => {
+  test("resources_discover exposes exactly the seven skill resources", () => {
     const result = host.fire("resources_discover", {}, { cwd: process.cwd() }) as { skillPaths: string[] };
-    expect(result.skillPaths).toHaveLength(5);
+    expect(result.skillPaths).toHaveLength(7);
     expect(result.skillPaths.every((p) => p.startsWith(omp.PACKAGE_ROOT) && p.endsWith(".md"))).toBe(true);
   });
 
@@ -495,6 +495,53 @@ describe("P2: taste-review bridge", () => {
     let report = "";
     handler?.("", { cwd: dir, editor: { setText: (text: string) => { report = text; } }, ui: {} });
     expect(report).toContain("Screenshot evidence (last session_stop): missing (captures: 0, stale: 0)");
+    expect(report).toContain("Driver: present");
+    expect(report).toContain("Run skill (project): none");
+  });
+
+  test("a driver run reaches the record, and its failures are reported as failures", () => {
+    const dir = makeSubstantiveProject();
+    mkdirSync(join(dir, "screenshots"));
+    writeFileSync(join(dir, "screenshots", "desktop-1440.png"), solidPng(100, 150));
+    writeFileSync(join(dir, "screenshots", "mobile-375.png"), solidPng(100, 150));
+    writeFileSync(join(dir, "screenshots", "driver-report.json"), JSON.stringify({
+      version: 1,
+      ok: true,
+      reason: "ok",
+      url: "http://localhost:5173",
+      captures: [
+        { path: "screenshots/desktop-1440.png", width: 1440, blank: false },
+        { path: "screenshots/mobile-375.png", width: 375, blank: false },
+      ],
+      consoleErrors: [],
+      pageErrors: [],
+      failedRequests: [],
+    }));
+    ageSources(dir);
+    host.fire("before_agent_start", { prompt: "Run it and screenshot the hero.", systemPrompt: ["base"] }, { cwd: dir });
+    const future = new Date(Date.now() + 120_000);
+    for (const name of ["desktop-1440.png", "mobile-375.png"]) utimesSync(join(dir, "screenshots", name), future, future);
+    utimesSync(join(dir, "css", "style.css"), new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
+
+    host.fire("session_stop", { session_id: "evidence-driver", ...assistant("Shipped.") }, { cwd: dir });
+    const record = traceRecords(dir).find((entry) => entry.event === "screenshot_evidence");
+    expect(record?.state).toBe("fresh");
+    expect(record?.driver).toBe("ok (2 captures, 0 console errors)");
+
+    // A failed run is a finding about the app, not a missing capture.
+    writeFileSync(join(dir, "screenshots", "driver-report.json"), JSON.stringify({
+      version: 1,
+      ok: false,
+      reason: "url-unreachable",
+      error: "http://localhost:5173 did not answer within 30000ms",
+      captures: [],
+      consoleErrors: [],
+      pageErrors: [],
+      failedRequests: [],
+    }));
+    host.fire("session_stop", { session_id: "evidence-driver-failed", ...assistant("Shipped.") }, { cwd: dir });
+    const failure = traceRecords(dir).filter((entry) => entry.event === "screenshot_evidence").at(-1);
+    expect(String(failure?.driver)).toContain("failed (url-unreachable");
   });
 });
 

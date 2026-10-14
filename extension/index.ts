@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import { redactSecrets } from "../shared/security.mjs";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
 import { claimFindings } from "../shared/delivery-claims.mjs";
+import { readDriverReport, summarizeDriver } from "../shared/driver-report.mjs";
 import { collectSkillUsage } from "../shared/skill-usage.mjs";
 import { resolveFlags, describeFlags } from "../shared/designer-flags.mjs";
 
@@ -124,6 +125,8 @@ const DESIGNER_SKILLS = Object.freeze([
   { name: "expression", file: join(SKILLS_ROOT, "expression.md"), role: "expression" },
   { name: "animate", file: join(SKILLS_ROOT, "animate.md"), role: "motion" },
   { name: "review-skill", file: join(SKILLS_ROOT, "review-skill.md"), role: "review" },
+  { name: "run", file: join(SKILLS_ROOT, "run.md"), role: "drive" },
+  { name: "run-skill-generator", file: join(SKILLS_ROOT, "run-skill-generator.md"), role: "drive-authoring" },
 ]);
 
 const DESIGNER_MCP_NAMES = new Set([
@@ -146,11 +149,11 @@ For substantive frontend work, run:
 1. node ${QUALITY_SCRIPT} --check .
 2. node ${LAYOUT_SCRIPT} .
 3. the project's build command
-4. browser QA at a narrow and wide viewport
-5. open the saved full-page screenshots and look at them: blank bands mean broken reveal behavior — fix it and recapture before delivery
+4. browser QA at 375px and a wide viewport with the tooling you have
+5. save a full-page capture per viewport in the project, then open the saved full-page screenshots and look at them: blank bands mean broken reveal behavior — fix and recapture
 
-Warnings are review input. Only true blockers should prevent delivery. Report commands actually run and unresolved limitations accurately. A check you could not run is not a pass: say it was not measured and why, instead of implying the page was verified — a static site has no build result, and a page you never opened has no browser result.
-The checks only police honesty and function — never boldness. Do not design defensively to satisfy them.`;
+Warnings are review input; only true blockers block delivery. Report what you ran and what remains unverified. A check you could not run is not a pass: say it was not measured, and why.
+The checks only police honesty and function — never boldness: do not design defensively to satisfy them.`;
 
 const DESIGNER_PROMPT = `[DESIGNER MODE: ACTIVE v5]
 
@@ -242,6 +245,7 @@ const CONTRACT_FRAGMENTS: Record<string, string> = {
   motion: `\n\n## Motion is in scope for this request\nRead ${join(SKILLS_ROOT, "animate.md")} before writing transitions. One orchestrated moment beats scattered effects; reduced motion and a no-JS load must still show every section.`,
   dataviz: `\n\n## Charts or numbers are in scope for this request\nDraw marks, ticks, and labels on one scale and label only values the data actually reaches. Take chart text from the theme tokens so both themes read. A chart that decorates or exaggerates is a failure, not a flourish.`,
   forms: `\n\n## Interactive input is in scope for this request\nGive every control a stable id and a visible focus state, and route submissions to a real destination. Never simulate success: an in-page confirmation that delivers nothing is a false claim about the product.`,
+  verify: `\n\n## Seeing it work is in scope for this request\nRead ${join(SKILLS_ROOT, "run.md")} before claiming anything about the rendered page. Launch the real app and drive it: a project run skill (\`.omp/skills/run-*/SKILL.md\`) if one exists, otherwise \`node ${join(SCRIPTS_ROOT, "designer-driver.mjs")} --start "<the project's start command>" --url <url>\`, which captures 1440 and 375, collects console errors, and writes \`screenshots/driver-report.json\`. Look at the captures. If launching took real work, generate a run skill with ${join(SKILLS_ROOT, "run-skill-generator.md")} instead of rediscovering it next time. A blank frame is a failure to launch, and a page you never opened has no result to report.`,
 };
 
 // Request words that put a concern in scope, and the dependencies that prove it
@@ -249,6 +253,8 @@ const CONTRACT_FRAGMENTS: Record<string, string> = {
 const MOTION_REQUEST_RE = /\b(animat\w*|motion|transition\w*|scroll[- ]?(?:reveal|driven|linked)|parallax|micro[- ]?interaction\w*|gsap|framer|lottie)\b/i;
 const DATAVIZ_REQUEST_RE = /\b(chart\w*|graph\w*|plot\w*|dashboard\w*|metric\w*|analytics|data ?viz\w*|sparkline\w*|kpi\w*|stats?)\b/i;
 const FORMS_REQUEST_RE = /\b(form\w*|sign ?up|newsletter|checkout|contact|login|sign[- ]?in|input\w*|onboard\w*|waitlist)\b/i;
+/** Words that mean the rendered page has to be seen, not described. */
+const VERIFY_REQUEST_RE = /\b(run|start|launch|serve|preview|screenshot\w*|capture\w*|browser\w*|renders?|rendering|visually?|verify|validate|lighthouse|responsive|viewport|breakpoint\w*|looks? (?:like|right|wrong)|see (?:it|how))\b/i;
 const MOTION_DEPENDENCIES = new Set([
   "framer-motion", "motion", "motion-v", "gsap", "animejs", "auto-animate", "lenis",
   "lottie-react", "lottie-web", "@react-spring/web", "@vueuse/motion", "@formkit/auto-animate",
@@ -283,6 +289,11 @@ function fragmentNamesFor(userPrompt: string, cwd: string, flags: Record<string,
   if (flags.motion && (MOTION_REQUEST_RE.test(userPrompt) || has(MOTION_DEPENDENCIES))) names.push("motion");
   if (flags.dataviz && (DATAVIZ_REQUEST_RE.test(userPrompt) || has(DATAVIZ_DEPENDENCIES))) names.push("dataviz");
   if (flags.forms && FORMS_REQUEST_RE.test(userPrompt)) names.push("forms");
+  // Verification needs something runnable: a page, a dev script, a start command.
+  const runnable = existsSync(join(cwd, "index.html")) ||
+    [...dependencies].length > 0 ||
+    existsSync(join(cwd, "package.json"));
+  if (flags.verify && runnable && VERIFY_REQUEST_RE.test(userPrompt)) names.push("verify");
   return names;
 }
 
@@ -522,9 +533,33 @@ function recordScreenshotEvidence(
   sessionId: string,
   evidence: ScreenshotEvidence,
 ): void {
-  const line = `${evidence.state} (captures: ${evidence.found}, stale: ${evidence.stale})`;
+  // The driver clause appears only when a driver has actually run, so a project
+  // that never used one keeps the short, stable line the suite asserts.
+  const driverClause = evidence.driver === "none" ? "" : `, driver: ${evidence.driver}`;
+  const line = `${evidence.state} (captures: ${evidence.found}, stale: ${evidence.stale})${driverClause}`;
   evidenceByCwd.set(cwd, line);
   writeTrace(cwd, "screenshot_evidence", { sessionId, ...evidence });
+}
+
+/**
+ * The project's own run skill, if a previous session authored one. cc discovers
+ * these per project and prefers them over re-deriving launch steps; the same
+ * lookup drives the doctor line and the contract's verify fragment.
+ */
+function projectRunSkill(cwd: string): string | null {
+  for (const root of [join(cwd, ".omp", "skills"), join(cwd, ".claude", "skills")]) {
+    if (!existsSync(root)) continue;
+    try {
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !/^run[-_]/.test(entry.name)) continue;
+        const skill = join(root, entry.name, "SKILL.md");
+        if (existsSync(skill)) return skill;
+      }
+    } catch {
+      // An unreadable skills directory is not a project defect; keep looking.
+    }
+  }
+  return null;
 }
 
 function doctorReport(cwd: string): string {
@@ -541,7 +576,7 @@ function doctorReport(cwd: string): string {
     "Designer doctor v5",
     "",
     `Mode for cwd: ${isEnabled(cwd) ? "enabled" : "disabled"}`,
-    `Loaded module: ${MODULE_FILE}`,
+    `Loaded module: ${MODULE_FILE}${MODULE_FILE.startsWith(PACKAGE_ROOT) ? "" : "  <- NOT this checkout (npm copy detected)"}`,
     `Package root: ${PACKAGE_ROOT}`,
     `Legacy extension copy: ${legacyRealpath ?? "none"}`,
     `Duplicate-load risk: ${duplicateRisk ? "YES - remove the legacy copy or unlink the plugin" : "no"}`,
@@ -551,6 +586,8 @@ function doctorReport(cwd: string): string {
     `MCPs: ${mcpSummary()}`,
     `Skill usage (last session_stop): ${skillUsageByCwd.get(cwd) ?? "not measured yet"}`,
     `Screenshot evidence (last session_stop): ${evidenceByCwd.get(cwd) ?? "not measured yet"}`,
+    `Run skill (project): ${projectRunSkill(cwd) ?? "none"}`,
+    `Driver: ${existsSync(join(SCRIPTS_ROOT, "designer-driver.mjs")) ? "present" : "missing"}`,
     describeFlags(resolveFlags({ cwd })),
     "",
     ...skills,
@@ -862,6 +899,8 @@ interface ScreenshotEvidence {
   stale: number;
   newestSourceEdit: number;
   newestCapture: number;
+  /** Last driver run for this project: `ok (2 captures, 0 console errors)`, `failed (…)`, or `none`. */
+  driver: string;
 }
 
 function findScreenshots(cwd: string): string[] {
@@ -992,12 +1031,16 @@ function tasteReview(
   const state: ScreenshotEvidence["state"] = screenshots.length === 0
     ? (visualChangeThisSession ? "missing" : "none")
     : (newestSourceEdit > 0 && staleShots === screenshots.length ? "stale" : "fresh");
+  // A driver run is the difference between "a capture exists" and "the app was
+  // driven and produced one"; its report says which, and why not when it failed.
+  const driverRun = readDriverReport(cwd);
   const evidence: ScreenshotEvidence = {
     state,
     found: screenshots.length,
     stale: staleShots,
     newestSourceEdit: Math.round(newestSourceEdit),
     newestCapture: Math.round(newestCapture),
+    driver: summarizeDriver(driverRun?.report ?? null),
   };
 
   if (state === "stale") {
@@ -1012,7 +1055,7 @@ function tasteReview(
   if (state === "missing" && substantive) {
     items.push({
       rule: "missing-screenshot-evidence",
-      detail: "The visual surface changed this session and the project holds no capture, so nothing in the record shows the rendered page was looked at. Save a full-page screenshot at a narrow and a wide viewport in the project (screenshot-*.png or a screenshots/ folder), open it, and fix what it shows at 375px too.",
+      detail: `The visual surface changed this session and the project holds no capture, so nothing in the record shows the rendered page was looked at. Save a full-page screenshot at a narrow and a wide viewport in the project (screenshot-*.png or a screenshots/ folder), open it, and fix what it shows at 375px too — the driver does both widths and the console in one command: node ${join(SCRIPTS_ROOT, "designer-driver.mjs")} --start "<the project's start command>" --url <url>.`,
     });
   }
 

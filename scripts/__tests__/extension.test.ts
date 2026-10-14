@@ -40,11 +40,11 @@ describe("v5 extension", () => {
     expect(handlers.has("tool_result")).toBe(false);
   });
 
-  test("discovers exactly four package-relative skills", () => {
+  test("discovers exactly seven package-relative skills", () => {
     const handler = handlers.get("resources_discover")?.[0];
     expect(handler).toBeDefined();
     const result = handler?.({}, { cwd: process.cwd() }) as { skillPaths: string[] };
-    expect(result.skillPaths).toHaveLength(5);
+    expect(result.skillPaths).toHaveLength(7);
     expect(result.skillPaths.every((path) => path.startsWith(module.PACKAGE_ROOT))).toBe(true);
   });
 

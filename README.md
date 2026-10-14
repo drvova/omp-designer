@@ -4,11 +4,12 @@ Focused UI/UX workflow for [Pi](https://pi.dev) and
 [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
 Version 5 removes the mandatory 12-skill gate and MCP state mutation. It provides
-five conditional skills (core workflow, visual system, expression toolkit,
-motion, delivery review), a concise system prompt with an anti-slop and
-art-direction core, evidence-aware validators, screenshot content analysis, a
-bounded taste-repair loop, an optional model-backed visual reviewer, and a
-reproducible real-agent comparison harness.
+seven skills (core workflow, visual system, expression toolkit, motion, delivery
+review, running the app, and authoring a project run skill), a concise system
+prompt assembled per turn with four conditional fragments, an anti-slop and
+art-direction core, evidence-aware validators, a shipped browser driver,
+screenshot content analysis, a bounded taste-repair loop, an optional
+model-backed visual reviewer, and a reproducible real-agent comparison harness.
 
 ## Install
 
@@ -25,6 +26,21 @@ omp install npm:omp-designer
 Do not also copy the extension into an agent extension directory. Duplicate
 install paths can register hooks twice. Run `/designer-doctor` if an older manual
 copy may still exist.
+
+### Working on this fork
+
+If you are running the checkout rather than the release, **link it — never
+install the published package beside it**, because installing replaces the fork
+silently for later sessions:
+
+```bash
+npm run install:local         # dry run
+npm run install:local:clean   # uninstall + link + gate, then restart omp
+npm run check:link            # prove the registered plugin is this checkout
+```
+
+Full detail, the four verification proofs, and the symptoms of a published copy
+being live: [docs/installation.md](docs/installation.md).
 
 ### Published package
 
@@ -119,16 +135,18 @@ consumption is not directly observable.
 
 ## Hosts: OMP and Pi
 
-The two adapters share prompt injection, five-skill discovery, plan-intent
+The two adapters share prompt injection, seven-skill discovery, plan-intent
 detection, and one bounded plan-only continuation. They are not at parity:
 
 | Capability | OMP (`extension/index.ts`) | Pi (`extensions/designer.ts`) |
 | --- | --- | --- |
 | Focused prompt injection | yes | yes |
-| Five-skill `resources_discover` | yes | yes |
+| Seven-skill `resources_discover` | yes | yes |
 | Plan-intent detection + bounded plan-only continuation | yes | yes |
 | Post-execution delivery checks (quality/layout/build on `session_stop`) | yes | no |
 | Bounded taste review (slop rules, blank screenshot bands, screenshot-evidence record, optional visual reviewer) | yes | no |
+| Contract assembled per turn (four flag-gated fragments: motion, dataviz, forms, verify) | yes | no |
+| Browser driver (`designer-driver.mjs`: 1440 + 375 captures, console errors, driver report) | yes | no |
 | Trace events under `~/.omp/agent/designer-traces` | yes | no |
 | Tool interception / skill-read hard gate | none | none |
 | MCP mutation | none | none |
@@ -303,7 +321,9 @@ scores, slop-rule hits, and reviewer verdicts side by side.
 extension/index.ts               omp extension (prompt, plan checks, delivery backstop)
 extensions/designer.ts           Pi extension (prompt + plan checks, no backstop)
 shared/security.mjs              shared secret patterns for redaction and release scan
-skills/                          five conditional skills
+skills/                          seven skills (incl. run + run-skill-generator)
+scripts/designer-driver.mjs      browser driver: captures, console errors, driver-report.json
+scripts/check-plugin-link.mjs    proves the installed plugin is this checkout, not the npm copy
 data/ui-ux-pro-max/              palette and typography search data
 scripts/fix-ai-slop.mjs          evidence-aware copy validator
 scripts/analyze-layout.mjs       proportional layout/contrast validator

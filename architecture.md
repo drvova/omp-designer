@@ -96,6 +96,8 @@ migration. Automation can override state with `OMP_DESIGNER_MODE`.
 | expression | choosing the ambition dials and the page's signature moment |
 | animate | meaningful motion is requested or present |
 | review-skill | delivery review |
+| run | the app has to be launched, driven, or captured |
+| run-skill-generator | launching the app took real work and belongs in a project run skill |
 
 No skill-read order is technically enforced. Prompt contract tests protect the
 important behavior: immediate-build requests do not trigger questionnaires, small
@@ -120,7 +122,7 @@ zero or more conditional fragments and the owner-preference section; a turn that
 earns none gets the default bytes exactly, which
 `scripts/__tests__/fixtures/contract-v5.1-*.txt` pin.
 
-The fragments are `motion`, `dataviz`, and `forms`. A fragment appears when the
+The fragments are `motion`, `dataviz`, `forms`, and `verify`. A fragment appears when the
 request words or an installed dependency put that concern in scope, and a flag of
 `false` suppresses it regardless of the request. Flags resolve in this order:
 `OMP_DESIGNER_FLAGS` (JSON in the environment), then `.omp/designer-flags.json`
@@ -136,6 +138,30 @@ the verdict stays pass/fail because every check this runtime runs marks itself
 skipped only when it cannot apply. The not-measured list is recorded anyway, and
 the contract instructs the model to report anything it could not run itself
 rather than implying the page was verified.
+
+## Driving the app
+
+`run` and `run-skill-generator` port the discipline the claude-code harness gets
+from its `run` skill and its drivers: running means launching the app and
+interacting with it, a blank frame is a failure to launch, and work that made
+launching possible is captured as a per-project run skill
+(`<project>/.omp/skills/run-<unit>/SKILL.md` plus the driver it names) instead of
+being rediscovered.
+
+`scripts/designer-driver.mjs` is the driver for web and static work: it starts or
+attaches to the app, captures a full page at 1440 and 375, collects console
+errors, page errors and failed requests, writes `screenshots/driver-report.json`,
+and exits non-zero when the app never answered or a capture is blank. Playwright
+is resolved from the project (or `--playwright` / `DESIGNER_PLAYWRIGHT`) and is
+deliberately not a dependency of this package; when it is absent the driver
+writes a report saying so and exits 2, because a page that was never rendered is
+not evidence. `shared/driver-report.mjs` holds the report contract — a report
+that is missing, truncated, or malformed reads as no evidence, never as success.
+
+The stop-time evidence record reads that report, so the record can say
+`driver: ok (2 captures, 0 console errors)` rather than only counting captures,
+and `/designer-doctor` prints the project's run skill and whether the driver is
+present.
 
 ## MCP boundary
 

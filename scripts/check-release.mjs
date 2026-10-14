@@ -11,13 +11,15 @@ import { runCommand } from "./lifecycle-lib.mjs";
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const failures = [];
-const expectedSkills = ["animate.md", "design-md.md", "designer-master.md", "review-skill.md"];
+const expectedSkills = ["animate.md", "design-md.md", "designer-master.md", "expression.md", "review-skill.md", "run.md", "run-skill-generator.md"];
 const requiredFiles = [
   "extension/index.ts",
   "extensions/designer.ts",
   "scripts/fix-ai-slop.mjs",
   "scripts/analyze-layout.mjs",
   "scripts/audit-data.mjs",
+  "scripts/check-plugin-link.mjs",
+  "scripts/designer-driver.mjs",
   "scripts/real-agent-eval.mjs",
   "scripts/install-local.mjs",
   "scripts/lifecycle-cli.mjs",
@@ -30,8 +32,8 @@ const requiredFiles = [
 ];
 
 if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) failures.push(`Invalid semver: ${pkg.version}`);
-if (!String(pkg.description).includes("4 conditional skills")) {
-  failures.push("package description must state the 4-skill architecture");
+if (!/\d+ skills/.test(String(pkg.description)) || !/4 conditional contract fragments/.test(String(pkg.description))) {
+  failures.push("package description must state the skill set and the conditional-fragment count");
 }
 if (pkg.bin?.["omp-designer"] !== "./scripts/lifecycle-cli.mjs") {
   failures.push("package bin must expose scripts/lifecycle-cli.mjs as omp-designer");

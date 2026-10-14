@@ -91,7 +91,7 @@ describe("contract assembly", () => {
 });
 
 describe("fragment inference", () => {
-  const allOn = { motion: true, dataviz: true, forms: true };
+  const allOn = { ...FLAG_DEFAULTS };
   const empty = makeProject({ "package.json": JSON.stringify({ name: "app", dependencies: {} }) });
 
   test("request words put a concern in scope", () => {
@@ -122,6 +122,32 @@ describe("fragment inference", () => {
     const bare = mkdtempSync(join(tmpdir(), "contract-bare-"));
     expect(fragmentNamesFor("add a chart", bare, allOn)).toEqual(["dataviz"]);
     rmSync(bare, { recursive: true, force: true });
+  });
+
+  test("verify fires when the request asks to see the app, and needs something runnable", () => {
+    const project = makeProject({ "package.json": JSON.stringify({ name: "app", scripts: { dev: "vite" } }) });
+    expect(fragmentNamesFor("run it and screenshot the hero", project, allOn)).toEqual(["verify"]);
+    expect(fragmentNamesFor("check the responsive layout at 375px", project, allOn)).toEqual(["verify"]);
+    rmSync(project, { recursive: true, force: true });
+
+    // Nothing to launch: the request words alone are not enough.
+    const bare = mkdtempSync(join(tmpdir(), "contract-norun-"));
+    expect(fragmentNamesFor("run it and screenshot the hero", bare, allOn)).toEqual([]);
+    rmSync(bare, { recursive: true, force: true });
+  });
+
+  test("verify is suppressed by its flag and stays quiet on unrelated requests", () => {
+    const project = makeProject({ "index.html": "<!doctype html><html><body>x</body></html>" });
+    expect(fragmentNamesFor("screenshot the page", project, { ...allOn, verify: false })).toEqual([]);
+    expect(fragmentNamesFor("tighten the heading copy", project, allOn)).toEqual([]);
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  test("the verify fragment names the driver and the project run skill", () => {
+    const fragment = CONTRACT_FRAGMENTS.verify;
+    expect(fragment).toContain("designer-driver.mjs");
+    expect(fragment).toContain(".omp/skills/run-");
+    expect(fragment).toContain("screenshots/driver-report.json");
   });
 });
 

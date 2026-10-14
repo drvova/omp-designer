@@ -21,17 +21,43 @@ be presented as installation requirements.
 
 ## Install
 
-Use exactly one installation mechanism:
+Use exactly one installation mechanism: **this checkout, linked.**
 
 ```bash
-pi install npm:omp-designer
-# or
-omp install npm:omp-designer
+cd /path/to/omp-designer
+npm run install:local          # dry run: prints the plan, changes nothing
+npm run install:local:clean    # links this checkout, keeps state and traces
 ```
 
-Never combine a plugin install with a manually copied extension. If upgrading
-from v4, use the lifecycle cleanup, install v5 once, fully restart the agent, and
-run `/designer-doctor`.
+Do not install the published package for this fork:
+
+```bash
+omp install npm:omp-designer   # NO - installs 4.1.0 next to the checkout
+pi install npm:omp-designer    # NO - same
+```
+
+The published build and this checkout are different codebases. A published
+install leaves its own 12 skills and a v4 skill gate, and a running agent that
+loaded it keeps enforcing that gate (demanding skills this checkout does not
+ship) until the process is restarted. `install:local:clean` unregisters it,
+removes the npm dependency entry from `~/.omp/plugins/package.json` and
+`bun.lock`, and links this checkout as a junction.
+
+Verify that this checkout is what leads, never the installer's own print:
+
+- `realpath(C:\Users\<you>\.omp\plugins\node_modules\omp-designer)` equals this
+  checkout (a Windows junction reports `False` from `islink`; `realpath` is the check)
+- sha256 of a file that exists only here matches the plugin path's copy
+- after a full restart, `/designer-doctor` prints `Loaded module:` under this
+  checkout
+
+If upgrading from v4, use the lifecycle cleanup, install this checkout once,
+fully restart the agent, and run `/designer-doctor`.
+
+`npm run check:link` runs the identity check on demand (exit 1 when the
+registered plugin is something other than this checkout). Full procedure,
+recovery, and the symptoms of a published copy being live:
+[docs/installation.md](docs/installation.md).
 
 Published install:
 

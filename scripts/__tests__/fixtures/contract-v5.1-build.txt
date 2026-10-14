@@ -69,10 +69,10 @@ For substantive frontend work, run:
 1. node {{ROOT}}\scripts\fix-ai-slop.mjs --check .
 2. node {{ROOT}}\scripts\analyze-layout.mjs .
 3. the project's build command
-4. browser QA at a narrow and wide viewport
-5. open the saved full-page screenshots and look at them: blank bands mean broken reveal behavior — fix it and recapture before delivery
+4. browser QA at 375px and a wide viewport with the tooling you have
+5. save a full-page capture per viewport in the project, then open the saved full-page screenshots and look at them: blank bands mean broken reveal behavior — fix and recapture
 
-Warnings are review input. Only true blockers should prevent delivery. Report commands actually run and unresolved limitations accurately. A check you could not run is not a pass: say it was not measured and why, instead of implying the page was verified — a static site has no build result, and a page you never opened has no browser result.
-The checks only police honesty and function — never boldness. Do not design defensively to satisfy them.
+Warnings are review input; only true blockers block delivery. Report what you ran and what remains unverified. A check you could not run is not a pass: say it was not measured, and why.
+The checks only police honesty and function — never boldness: do not design defensively to satisfy them.
 
 [/DESIGNER MODE]

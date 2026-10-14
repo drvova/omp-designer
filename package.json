@@ -2,7 +2,7 @@
   "name": "omp-designer",
   "version": "5.1.0",
   "type": "module",
-  "description": "Focused UI/UX workflow for Pi and oh-my-pi with 4 conditional skills, evidence-aware checks, and browser-first review.",
+  "description": "Focused UI/UX workflow for Pi and oh-my-pi with 7 skills, 4 conditional contract fragments, evidence-aware checks, and browser-first review.",
   "keywords": [
     "pi-package",
     "pi",
@@ -57,7 +57,9 @@
     "docs/",
     "AGENTS.md",
     "architecture.md",
-    "package.json"
+    "package.json",
+    "scripts/check-plugin-link.mjs",
+    "scripts/designer-driver.mjs"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -76,7 +78,7 @@
     "test:cleanup": "node scripts/__tests__/cleanup-artifacts.test.mjs",
     "cleanup:artifacts": "node scripts/cleanup-artifacts.mjs",
     "test:security": "node scripts/__tests__/security.test.mjs",
-    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:claims && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
+    "test": "npm run typecheck && npm run test:extension && npm run test:e2e && npm run test:validators && npm run test:layout && npm run test:lifecycle && npm run test:data && npm run test:trace && npm run test:prompt && npm run test:usage && npm run test:claims && npm run test:driver-report && npm run test:link && npm run test:contract && npm run test:docs && npm run test:quality && npm run test:screenshots && npm run test:cleanup && npm run test:security",
     "e2e:smoke": "bun scripts/e2e-smoke.mjs",
     "test:real": "node scripts/real-agent-eval.mjs",
     "test:real:suite": "node scripts/real-agent-eval.mjs --suite",
@@ -91,7 +93,10 @@
     "check:release": "node scripts/check-release.mjs",
     "prepublishOnly": "npm test && npm run check:release",
     "test:contract": "bun test scripts/__tests__/contract-assembly.test.ts",
-    "test:claims": "node scripts/__tests__/delivery-claims.test.mjs"
+    "test:claims": "node scripts/__tests__/delivery-claims.test.mjs",
+    "check:link": "node scripts/check-plugin-link.mjs",
+    "test:driver-report": "node scripts/__tests__/driver-report.test.mjs",
+    "test:link": "node scripts/__tests__/plugin-link.test.mjs"
   },
   "engines": {
     "node": ">=20.19.0"
