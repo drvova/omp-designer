@@ -1,6 +1,7 @@
 ---
 name: review-skill
 description: "Proportional delivery review for implemented frontend work."
+when_to_use: Load before delivering implemented frontend work, to run the proportional review it describes.
 ---
 
 # Delivery Review

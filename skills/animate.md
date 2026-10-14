@@ -1,6 +1,7 @@
 ---
 name: animate
 description: "Optional motion guidance. Read only when meaningful animation is requested or already exists."
+when_to_use: Load only when meaningful motion is requested or already present — never to add decoration.
 ---
 
 # Motion

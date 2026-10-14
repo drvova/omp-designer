@@ -1,6 +1,7 @@
 ---
 name: designer-master
 description: "Core product-design workflow. Read for substantial UI work; keep small edits proportional."
+when_to_use: Load before any new page, redesign, or multi-section frontend change — not for small edits.
 ---
 
 # Designer Core

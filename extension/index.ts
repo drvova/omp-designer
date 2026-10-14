@@ -30,6 +30,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactSecrets } from "../shared/security.mjs";
 import { analyzeScreenshot } from "../shared/screenshot-analysis.mjs";
+import { collectSkillUsage } from "../shared/skill-usage.mjs";
 
 const HOME = homedir();
 const MODULE_FILE = fileURLToPath(import.meta.url);
@@ -50,6 +51,11 @@ const GLOBAL_STATE_KEY = "*";
 const INSTANCE_SYMBOL = Symbol.for("omp-designer.v5.registered");
 const INSTANCE_ENV = "OMP_DESIGNER_V5_REGISTERED_PID";
 const INSTANCE_LOCK = join(tmpdir(), `omp-designer-v5-${process.pid}.lock`);
+
+// Last measured skill-usage line per working directory. Module scope because the
+// doctor command reads it from outside the registration closure; keys are working
+// directories that accumulate at runtime, so it stays a Map.
+const skillUsageByCwd = new Map<string, string>();
 
 const DESIGNER_SKILLS = Object.freeze([
   { name: "designer-master", file: join(SKILLS_ROOT, "designer-master.md"), role: "core" },
@@ -304,6 +310,43 @@ function writeTrace(cwd: string, event: string, details: Record<string, unknown>
   }
 }
 
+/**
+ * Measure which skill bodies this session actually read.
+ *
+ * Observation only: v5 deliberately has no skill gate, and this adds no
+ * enforcement. It reads the transcript the host already wrote and records the
+ * per-skill evidence, so the original question ("did the agent ever read
+ * designer-master?") stays answerable without reintroducing a gate. Failures are
+ * swallowed; observability must never break the agent.
+ */
+function recordSkillUsage(cwd: string, sessionId: string, sinceMs?: number): void {
+  try {
+    const usage = collectSkillUsage({
+      sessionId,
+      cwd,
+      sinceMs: sinceMs ?? 0,
+      skills: DESIGNER_SKILLS.map((skill) => ({ name: skill.name, file: skill.file })),
+    });
+    skillUsageByCwd.set(cwd, usage.line);
+    writeTrace(cwd, "skill_usage", {
+      sessionId,
+      transcript: usage.transcript,
+      reason: usage.reason,
+      read: usage.read,
+      namedNeverRead: usage.namedNeverRead,
+      silent: usage.silent,
+      unmeasured: usage.unmeasured,
+      detail: usage.rows.map((row: { name: string; mentioned: number; read: number }) => ({
+        name: row.name,
+        mentioned: row.mentioned,
+        read: row.read,
+      })),
+    });
+  } catch {
+    // Observability must not break the agent.
+  }
+}
+
 function safeRealpath(path: string): string | null {
   try {
     return realpathSync(path);
@@ -346,6 +389,7 @@ function doctorReport(cwd: string): string {
     `Layout validator: ${existsSync(LAYOUT_SCRIPT) ? "present" : "missing"}`,
     `Palette data: ${existsSync(join(DATA_ROOT, "colors.csv")) ? "present" : "missing"}`,
     `MCPs: ${mcpSummary()}`,
+    `Skill usage (last session_stop): ${skillUsageByCwd.get(cwd) ?? "not measured yet"}`,
     "",
     ...skills,
     "",
@@ -939,6 +983,9 @@ export default function designerExtension(pi: ExtensionAPI): void {
       ? String(eventRecord.session_id)
       : `${cwd}:${sessionTokenByCwd.get(cwd) ?? "nostart"}`;
     const userPrompt = userFactsByCwd.get(cwd) ?? "";
+
+    // Evidence, not enforcement: record which skill bodies this session read.
+    recordSkillUsage(cwd, sessionId, sessionStart);
 
     if (asksForApprovalPlan(userPrompt)) {
       const response = messageText(eventRecord.last_assistant_message);

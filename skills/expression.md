@@ -1,6 +1,7 @@
 ---
 name: expression
 description: "Choose and build the page's signature moment: design read, ambition dials, and working construction recipes. Read for substantive new pages."
+when_to_use: Load for a substantive new page, to choose the art direction and the one signature moment the page carries.
 ---
 
 # Expression

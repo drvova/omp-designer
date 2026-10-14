@@ -1,6 +1,7 @@
 ---
 name: design-md
 description: "Create a compact visual-system contract for new pages and major redesigns."
+when_to_use: Load before a new visual system or major redesign, to fix palette, type scale, and spacing as a written contract.
 ---
 
 # Visual System
