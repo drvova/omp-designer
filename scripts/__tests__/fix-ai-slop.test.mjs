@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const script = new URL("../fix-ai-slop.mjs", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../fix-ai-slop.mjs", import.meta.url));
 const cases = [];
 
 function test(name, fn) {

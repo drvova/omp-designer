@@ -10,6 +10,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { basename, extname, join } from "node:path";
 
 const args = process.argv.slice(2);
@@ -151,7 +152,7 @@ function auditSelectedPalette(design) {
   if (rowNumber == null) return null;
 
   const palettePath = join(project, "data", "ui-ux-pro-max", "colors.csv");
-  const fallbackPath = new URL("../data/ui-ux-pro-max/colors.csv", import.meta.url).pathname;
+  const fallbackPath = fileURLToPath(new URL("../data/ui-ux-pro-max/colors.csv", import.meta.url));
   const path = existsSync(palettePath) ? palettePath : fallbackPath;
   if (!existsSync(path)) {
     push("warning", "palette-data-missing", "DESIGN.md selects a CSV row, but colors.csv is unavailable.");

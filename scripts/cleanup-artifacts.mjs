@@ -16,7 +16,7 @@
  *   omp-session-*.html           captured session dumps
  */
 import { existsSync, readdirSync, statSync, rmSync, realpathSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import { join, resolve, basename, relative, isAbsolute } from "node:path";
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
@@ -52,10 +52,15 @@ function dirSize(path) {
 }
 
 // Guard: a target must resolve to a path strictly inside the repo root.
+// Compared through relative(), which is separator-agnostic: testing a prefix of
+// `${root}/` matched nothing on Windows, where realpathSync returns backslashes,
+// so every target was rejected and the cleaner silently removed nothing.
 function insideRoot(path) {
   try {
     const real = realpathSync(path);
-    return real === root ? false : real.startsWith(`${root}/`);
+    if (real === root) return false;
+    const rel = relative(root, real);
+    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
   } catch {
     return false;
   }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import {
   chmodSync,
   existsSync,
@@ -22,7 +23,7 @@ import {
 import { installLocal } from "../install-local.mjs";
 import { uninstallSystem } from "../uninstall-system.mjs";
 
-const packageRoot = resolve(new URL("../..", import.meta.url).pathname);
+const packageRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 // Derive the expected version from package.json so a version bump does not break
 // these lifecycle assertions.
 const pkgVersion = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version;
@@ -52,9 +53,14 @@ function seedLegacy(home) {
   write(join(home, ".omp/agent/designer-phases/run.json"), "{}\n");
 }
 
+// Windows needs a junction to link a directory without Developer Mode or
+// elevation; the POSIX "dir" type raises EPERM there.
+const LINK_TYPE = process.platform === "win32" ? "junction" : "dir";
+
 function fakeOmp(home, { leavePluginOnUninstall = false } = {}) {
-  const path = join(home, "bin", "omp");
-  write(path, `#!/usr/bin/env node
+  const payload = join(home, "bin", "omp.js");
+  const launcher = process.platform === "win32" ? join(home, "bin", "omp.cmd") : join(home, "bin", "omp");
+  write(payload, `#!/usr/bin/env node
 const { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
 const { dirname, join } = require("node:path");
 const args = process.argv.slice(2);
@@ -74,7 +80,7 @@ if (args[0] === "plugin" && args[1] === "link") {
   const version = JSON.parse(readFileSync(join(source, "package.json"), "utf8")).version;
   mkdirSync(dirname(pluginPath), { recursive: true });
   rmSync(pluginPath, { recursive: true, force: true });
-  symlinkSync(source, pluginPath, "dir");
+  symlinkSync(source, pluginPath, "${LINK_TYPE}");
   writeFileSync(lockPath, JSON.stringify({ plugins: { "omp-designer": { version, enabled: true } } }));
   console.log(JSON.stringify({ name: "omp-designer", version, path: source }));
   process.exit(0);
@@ -82,8 +88,12 @@ if (args[0] === "plugin" && args[1] === "link") {
 console.error("unexpected fake omp args", args);
 process.exit(2);
 `);
-  chmodSync(path, 0o755);
-  return path;
+  if (process.platform === "win32") {
+    write(launcher, `@echo off\r\nnode "%~dp0omp.js" %*\r\n`);
+  } else {
+    chmodSync(payload, 0o755);
+  }
+  return launcher;
 }
 
 function quietIo() {
@@ -102,7 +112,7 @@ test("inspection finds plugin metadata and exact legacy paths", () => {
     seedLegacy(home);
     const pluginPath = join(home, ".omp/plugins/node_modules/omp-designer");
     mkdirSync(dirname(pluginPath), { recursive: true });
-    symlinkSync(packageRoot, pluginPath, "dir");
+    symlinkSync(packageRoot, pluginPath, LINK_TYPE);
     write(join(home, ".omp/plugins/omp-plugins.lock.json"), JSON.stringify({
       plugins: { "omp-designer": { version: "4.0.0", enabled: true } },
     }));
@@ -235,7 +245,7 @@ test("an orphan plugin link is removed without invoking omp", () => {
   try {
     const pluginPath = join(home, ".omp/plugins/node_modules/omp-designer");
     mkdirSync(dirname(pluginPath), { recursive: true });
-    symlinkSync(packageRoot, pluginPath, "dir");
+    symlinkSync(packageRoot, pluginPath, LINK_TYPE);
     const before = inspectOmpSystem(home);
     assert.equal(before.plugin.lockVersion, null);
     assert.equal(removeOrphanPlugin(before, { dryRun: false, log() {} }), true);
@@ -251,7 +261,7 @@ test("system uninstall removes a plugin path left behind by omp", () => {
     const omp = fakeOmp(home, { leavePluginOnUninstall: true });
     const pluginPath = join(home, ".omp/plugins/node_modules/omp-designer");
     mkdirSync(dirname(pluginPath), { recursive: true });
-    symlinkSync(packageRoot, pluginPath, "dir");
+    symlinkSync(packageRoot, pluginPath, LINK_TYPE);
     write(join(home, ".omp/plugins/omp-plugins.lock.json"), JSON.stringify({
       plugins: { "omp-designer": { version: "5.0.0", enabled: true } },
     }));

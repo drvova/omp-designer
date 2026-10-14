@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const script = new URL("../cleanup-artifacts.mjs", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../cleanup-artifacts.mjs", import.meta.url));
 
 function makeRepo() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cleanup-root-")));
@@ -42,7 +43,8 @@ test("dry run lists generated artifacts and removes nothing", () => {
     const result = run(root);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /Would remove/);
-    assert.match(result.stdout, /test-output\/run1/);
+    // The listed path uses the host separator: match either, not a POSIX slash.
+    assert.match(result.stdout, /test-output[\\/]run1/);
     assert.match(result.stdout, /screenshot-home\.png/);
     assert.match(result.stdout, /omp-session-abc\.html/);
     // Nothing deleted on a dry run.

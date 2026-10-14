@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const script = new URL("../audit-trace.mjs", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../audit-trace.mjs", import.meta.url));
 
 function fixture(events) {
   const dir = mkdtempSync(join(tmpdir(), "designer-trace-"));

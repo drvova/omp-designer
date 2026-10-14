@@ -159,12 +159,51 @@ export function removeOrphanPlugin(report, {
   return true;
 }
 
+/**
+ * Quote one argument for a Windows command line using the CRT rules that
+ * CommandLineToArgvW reverses, so a path with spaces or quotes survives.
+ */
+function quoteWindowsArg(value) {
+  const text = String(value);
+  if (!/[\s"]/.test(text)) return text;
+  return `"${text.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+}
+
 export function runCommand(command, args, {
   cwd,
   env = process.env,
   allowFailure = false,
   quiet = false,
 } = {}) {
+  // Windows cannot exec a .cmd/.bat shim without a shell, and the platform's own
+  // tooling ships them (npm is npm.cmd, omp installers ship omp.cmd). A bare
+  // name with no extension needs the shell for PATHEXT resolution; an explicit
+  // .exe path must not go through one. Node refuses the implicit shell since the
+  // 2024 spawn hardening, so ask explicitly and only on those paths.
+  const isShim = /\.(cmd|bat)$/i.test(command);
+  const isBareName = !/[\\/]/.test(command) && !/\.(exe|com|cmd|bat)$/i.test(command);
+  const needsShell = process.platform === "win32" && (isShim || isBareName);
+  if (needsShell) {
+    // A single quoted command line, not shell: true plus an args array: passing
+    // args alongside the shell option concatenates them unescaped (DEP0190) and
+    // mis-quotes any path containing a space.
+    const line = [command, ...args].map(quoteWindowsArg).join(" ");
+    const shellResult = spawnSync(line, {
+      cwd,
+      env,
+      encoding: "utf8",
+      stdio: quiet ? "pipe" : "inherit",
+      maxBuffer: 8 * 1024 * 1024,
+      shell: true,
+      windowsHide: true,
+    });
+    if (shellResult.error) throw shellResult.error;
+    if (!allowFailure && shellResult.status !== 0) {
+      const detail = quiet ? `\n${shellResult.stdout ?? ""}${shellResult.stderr ?? ""}`.trimEnd() : "";
+      throw new Error(`${command} ${args.join(" ")} failed with exit ${shellResult.status}.${detail}`);
+    }
+    return shellResult;
+  }
   const result = spawnSync(command, args, {
     cwd,
     env,

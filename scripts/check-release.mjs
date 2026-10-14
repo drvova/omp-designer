@@ -5,8 +5,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { findSecrets, scanTree } from "../shared/security.mjs";
+import { runCommand } from "./lifecycle-lib.mjs";
 
 const root = process.cwd();
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -41,16 +41,19 @@ for (const file of requiredFiles) {
   if (!existsSync(join(root, file))) failures.push(`Missing release file: ${file}`);
 }
 
-const packed = spawnSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
+// npm is npm.cmd on Windows and cannot be spawned without a shell, so route it
+// through the shared runner, which resolves shims and bare names per platform.
+const packed = runCommand("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
   cwd: root,
-  encoding: "utf8",
-  timeout: 60_000,
-  maxBuffer: 4 * 1024 * 1024,
+  allowFailure: true,
+  quiet: true,
 });
 
 let packedFiles = [];
-if (packed.status !== 0) {
-  failures.push(`npm pack --dry-run failed: ${packed.stderr || packed.stdout}`);
+if (packed.error) {
+  failures.push(`npm pack --dry-run could not start: ${packed.error.message}`);
+} else if (packed.status !== 0) {
+  failures.push(`npm pack --dry-run failed: ${(packed.stderr || packed.stdout || "").trim() || `exit ${packed.status}`}`);
 } else {
   try {
     packedFiles = JSON.parse(packed.stdout)[0].files.map((entry) => entry.path);

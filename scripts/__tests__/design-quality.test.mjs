@@ -3,6 +3,7 @@
  * Designer-quality: rubric schema, issue taxonomy, behavior signals, and report.
  */
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -189,7 +190,7 @@ test("report has the P4 schema and marks skill reads unavailable", () => {
 // ---- Integration: real validator JSON flows through the taxonomy ----
 
 test("real fix-ai-slop JSON: fabricated number blocks, buzzword is info", () => {
-  const script = new URL("../fix-ai-slop.mjs", import.meta.url).pathname;
+  const script = fileURLToPath(new URL("../fix-ai-slop.mjs", import.meta.url));
   const blockDir = fixture({ "src/App.tsx": "export default () => <p>Teams finish 47% faster.</p>;\n" });
   const tasteDir = fixture({ "src/App.tsx": "export default () => <p>A seamless workflow for your crew.</p>;\n" });
   try {
