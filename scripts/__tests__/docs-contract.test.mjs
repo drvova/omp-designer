@@ -73,7 +73,7 @@ const checks = [
   ["the two plates are different files for the same figure", plateDark !== plateLight && /data-theme="dark"/.test(plateDark) && /data-theme="light"/.test(plateLight)],
   ["the README embeds the plates for both colour schemes", /<picture>/.test(readme) && /prefers-color-scheme: dark[\s\S]{0,120}architecture\.svg/.test(readme) && /architecture-light\.svg/.test(readme)],
   ["the README alt text describes the drawing", /alt="[^"]{120,}"/.test(readme)],
-  ["the README names the generator", /build-architecture-figure\.mjs/.test(readme)],
+  ["the README names the generator", /build-architecture-diagram\.mjs/.test(readme)],
 
   // Secret hygiene.
   // The way back is a loop: the page posts, the project records, the turn is told.

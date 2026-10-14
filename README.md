@@ -11,30 +11,25 @@ art-direction core, evidence-aware validators, a shipped browser driver,
 screenshot content analysis, a bounded taste-repair loop, an optional
 model-backed visual reviewer, and a reproducible real-agent comparison harness.
 
-## What it is, as one object
+## The runtime in one picture
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/architecture.svg">
-  <img src="docs/architecture-light.svg" alt="An isometric technical drawing of a projection bench on a base plate. A roll of paper feeds across the bench; a lamp on two posts shines through five stencil plates, one of them swung into the beam; nine lenses stand in a rack beside it; the beam lands on a sheet on a light table, where a clip holds it down. A camera carriage on two rails points at the sheet, two prints hang clipped on a drying line, a dial gauge stands on a pedestal at the right, and a keypad with a spool of punched tape sits at the front left, the tape running back to the roll." width="100%">
+  <img src="docs/architecture-light.svg" alt="A flat schematic of the omp-designer runtime. Five conditional fragments — motion, dataviz, forms, verify, workshop — feed before_agent_start, which assembles the contract once per turn. The model then works with its tools, calls designer_check, which renders the page and returns the diagnostics in the tool result, and session_stop runs the delivery checks with one bounded repair back into the turn. What the turn leaves on disk: screenshots and a driver report, the canvas page and its index, session traces, WORKSHOP.md, and an append-only decision log. A canvas server serves the project over SSE and takes a click at POST /workshop/decide; that decision is validated, logged beside the project, and injected into the next turn once. The gate and the eval suite grade the session. Deliberate: nothing is gated — no tool call is intercepted, no skill read is enforced — and the Pi adapter gets the prompt and the plan checks without the delivery backstop." width="100%">
 </picture>
 
-The drawing is the runtime, part for part:
+Solid arrows run every turn, the dashed loop is the one bounded repair, and the
+dotted line is a read. The `canvas server` box and `the way back` are the part that
+is easy to miss: the reader answers **on the page**, the click is validated against
+the options the model published, logged beside the project, and injected into the
+next turn exactly once — never replayed, never re-asked. `DELIBERATE` is drawn in
+the picture because the limits are part of the design, not caveats.
 
-| In the drawing | In the extension |
-|---|---|
-| the roll of paper, feeding the bench | the contract, assembled per turn |
-| five stencil plates on one bar, one swung into the beam | the five conditional fragments, and the flags that switch them |
-| nine lenses in a rack | the nine skills |
-| the sheet on the light table, clipped down | the page the session is working on — the one lit thing |
-| the camera carriage on rails | the driver: two captures, 1440 and 375 |
-| two prints on the drying line | the canvas boards |
-| the keypad and its punched tape, running back to the roll | the workshop: a click on the page comes back as a decision |
-| the dial gauge | the check's verdict |
-
-It is a static SVG on purpose — a README image runs no script — and it is built,
-not hand-drawn: `node scripts/build-architecture-figure.mjs [--light] [--page]`
-writes both plates from the isometric kit in the `anatomy` skill
-(`ANATOMY_KIT` points at it).
+It is a static SVG on purpose — a README image runs no script and no WebGL — and it
+is built rather than hand-drawn: `node
+scripts/build-architecture-diagram.mjs [--light] [--page]` writes both plates,
+self-contained, with no runtime and no network font. Both plates are committed, so reading this page never needs the
+builder.
 
 ## Install
 
@@ -357,7 +352,7 @@ data/gallery/                    three golden reference pages
 data/qa/overlap-check.js         browser overlap/clipping QA snippet
 docs/architecture.svg            the figure above, dark plate (generated)
 docs/architecture-light.svg      the same figure, light plate (generated)
-scripts/build-architecture-figure.mjs  builds both plates from the anatomy kit
+scripts/build-architecture-diagram.mjs  builds both plates of the diagram above
 scripts/e2e-smoke.mjs            simulated host-bridge smoke runner (optional --real-omp)
 scripts/gate.mjs                 runs every suite in the package.json chain, no package manager
 scripts/check-release.mjs        packed-artifact and repo-wide secret release gate
