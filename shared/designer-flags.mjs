@@ -31,6 +31,7 @@ export const FLAG_DEFAULTS = Object.freeze({
   dataviz: true,
   forms: true,
   verify: true,
+  workshop: true,
 });
 
 export const FLAG_FILE = join(".omp", "designer-flags.json");

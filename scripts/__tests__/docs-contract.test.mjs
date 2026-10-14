@@ -3,7 +3,7 @@
  * Documentation consistency contract.
  *
  * String-based guards (no generator) that keep the docs aligned with the current
- * v5 architecture: eight skills, no skill-read hard gate, honest OMP/Pi
+ * v5 architecture: nine skills, no skill-read hard gate, honest OMP/Pi
  * difference, simulated-vs-real E2E clarity, and secret hygiene.
  */
 import assert from "node:assert/strict";
@@ -22,7 +22,7 @@ const parity = read("docs/cc-parity.md");
 
 const checks = [
   ["package ships the shared core (incl. security.mjs)", pkg.files.some((f) => f === "shared/security.mjs" || f === "shared/" || f === "shared")],
-  ["package description states the skill and fragment counts", /8 skills/.test(String(pkg.description)) && /4 conditional contract fragments/.test(String(pkg.description))],
+  ["package description states the skill and fragment counts", /9 skills/.test(String(pkg.description)) && /5 conditional contract fragments/.test(String(pkg.description))],
   ["test script runs the simulated host-bridge suite", /test:e2e/.test(pkg.scripts.test)],
 
   // No current-tense v4 hard gate claim.
@@ -45,8 +45,8 @@ const checks = [
   ["README notes real-omp smoke can skip", /--real-omp[\s\S]*SKIPPED/i.test(readme)],
   ["architecture notes real-omp SKIPPED not PASS", /SKIPPED[\s\S]{0,15}never[\s\S]{0,15}PASS/i.test(architecture)],
 
-  // Four skills present in the primary docs.
-  ["README mentions the skill set", /eight skills/i.test(readme)],
+  // The skill set present in the primary docs.
+  ["README mentions the skill set", /nine skills/i.test(readme)],
   // The fork-first rule is a document and a guard, not a memory.
   ["installation doc states the link-never-npm rule", /npm run install:local:clean/.test(installation) && /NEVER\s+omp install npm:omp-designer/.test(installation)],
   ["installation doc names the verification and the guard", /check:link/.test(installation) && /realpath/.test(installation)],

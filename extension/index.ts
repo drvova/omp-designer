@@ -49,6 +49,7 @@ const LAYOUT_SCRIPT = join(SCRIPTS_ROOT, "analyze-layout.mjs");
 const AGENT_ROOT = join(HOME, ".omp", "agent");
 const STATE_FILE = join(AGENT_ROOT, "designer-state.json");
 const VIBE_FILE = join(AGENT_ROOT, "designer-vibes.json");
+const WORKSHOP_FILE = join(AGENT_ROOT, "designer-workshops.json");
 const MCP_CONFIG = join(AGENT_ROOT, "mcp.json");
 const TRACE_DIR = join(AGENT_ROOT, "designer-traces");
 const LEGACY_EXTENSION = join(AGENT_ROOT, "extensions", "designer", "index.ts");
@@ -130,6 +131,7 @@ const DESIGNER_SKILLS = Object.freeze([
   { name: "run", file: join(SKILLS_ROOT, "run.md"), role: "drive" },
   { name: "run-skill-generator", file: join(SKILLS_ROOT, "run-skill-generator.md"), role: "drive-authoring" },
   { name: "dataviz", file: join(SKILLS_ROOT, "dataviz.md"), role: "data-display" },
+  { name: "workshop", file: join(SKILLS_ROOT, "workshop.md"), role: "collaboration" },
 ]);
 
 const DESIGNER_MCP_NAMES = new Set([
@@ -248,6 +250,7 @@ const CONTRACT_FRAGMENTS: Record<string, string> = {
   motion: `\n\n## Motion is in scope for this request\nRead ${join(SKILLS_ROOT, "animate.md")} before writing transitions. One orchestrated moment beats scattered effects; reduced motion and a no-JS load must still show every section.`,
   dataviz: `\n\n## Charts or numbers are in scope for this request\nRead ${join(SKILLS_ROOT, "dataviz.md")} before drawing anything, and take the form from the data rather than from taste. One scale per chart, every label naming a value the data reaches, chart text from the theme tokens, semantic colors kept separate from the accent. A chart that decorates or exaggerates is a failure, not a flourish.`,
   forms: `\n\n## Interactive input is in scope for this request\nGive every control a stable id and a visible focus state, and route submissions to a real destination. Never simulate success: an in-page confirmation that delivers nothing is a false claim about the product.`,
+  workshop: `\n\n## This project is in workshop mode\nRead ${join(SKILLS_ROOT, "workshop.md")} and run the decision loop it describes: draft first, exactly one open decision per turn, two to four concrete options with what each buys and costs, apply what was chosen and show the updated artefact, and keep the settled and open decisions where the project can see them. Narrate what changed and what is next — never the machinery. When nothing is left, ask for the build in one line.`,
   verify: `\n\n## Seeing it work is in scope for this request\nRead ${join(SKILLS_ROOT, "run.md")} before claiming anything about the rendered page. Launch the real app and drive it: a project run skill (\`.omp/skills/run-*/SKILL.md\`) if one exists, otherwise \`node ${join(SCRIPTS_ROOT, "designer-driver.mjs")} --start "<the project's start command>" --url <url>\`, which captures 1440 and 375, collects console errors, and writes \`screenshots/driver-report.json\`. Look at the captures. If launching took real work, generate a run skill with ${join(SKILLS_ROOT, "run-skill-generator.md")} instead of rediscovering it next time. The run leaves a canvas beside the captures (\`designer-canvas.html\`, rebuilt by \`node ${join(SCRIPTS_ROOT, "designer-canvas.mjs")}\`) showing every board and capture at once. A blank frame is a failure to launch, and a page you never opened has no result to report.`,
 };
 
@@ -308,13 +311,18 @@ function fragmentNamesFor(userPrompt: string, cwd: string, flags: Record<string,
  * owner-preference section are appended at the same anchor the marker strip uses,
  * so a turn with neither is byte-identical to the default.
  */
-function buildContract({ planOnly = false, fragments = [], vibe = "" }: { planOnly?: boolean; fragments?: string[]; vibe?: string } = {}): string {
+function buildContract({ planOnly = false, fragments = [], vibe = "", workshop = "" }: { planOnly?: boolean; fragments?: string[]; vibe?: string; workshop?: string } = {}): string {
   const base = planOnly ? PLAN_ONLY_PROMPT : DESIGNER_PROMPT;
   // Order comes from the declared fragment table, not from the caller, so a
   // future caller cannot reshuffle the contract. Unknown names drop out.
   const declarOrder = Object.keys(CONTRACT_FRAGMENTS);
   const extra = [
     ...declarOrder.filter((name) => fragments.includes(name)).map((name) => CONTRACT_FRAGMENTS[name]),
+    // The workshop's own goal rides with its fragment: the mode is per project,
+    // and the goal is the user's words, not a fixed rule.
+    workshop && fragments.includes("workshop")
+      ? `\n\nWorkshop goal, in the user's words: ${workshop}`
+      : "",
     vibe,
   ].filter(Boolean);
   if (extra.length === 0) return base;
@@ -394,6 +402,30 @@ function writeState(state: Record<string, boolean>): void {
   const temporary = `${STATE_FILE}.${process.pid}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
   renameSync(temporary, STATE_FILE);
+}
+
+/** Open workshops, keyed by working directory. Same shape as the vibes file. */
+function readWorkshops(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(readFileSync(WORKSHOP_FILE, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim().length > 0),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeWorkshops(workshops: Record<string, string>): void {
+  mkdirSync(AGENT_ROOT, { recursive: true });
+  const temporary = `${WORKSHOP_FILE}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(workshops, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, WORKSHOP_FILE);
+}
+
+function workshopGoal(cwd: string): string {
+  return readWorkshops()[cwd] ?? "";
 }
 
 function readVibes(): Record<string, string> {
@@ -646,6 +678,7 @@ function doctorReport(cwd: string): string {
     `Driver: ${existsSync(join(SCRIPTS_ROOT, "designer-driver.mjs")) ? "present" : "missing"}`,
     `Canvas: ${describeCanvas(cwd)}`,
     `Designer check (last call): ${checkByCwd.get(cwd) ?? "never run"}`,
+    `Workshop: ${workshopGoal(cwd) ? `open — ${workshopGoal(cwd).slice(0, 80)}` : "none"}`,
     `Skill context: ${describeSkillContext()}`,
     describeFlags(resolveFlags({ cwd })),
     "",
@@ -1306,6 +1339,33 @@ export default function designerExtension(pi: ExtensionAPI): void {
     });
   }
 
+  pi.registerCommand("designer-workshop", {
+    description: "Open a design workshop for this project: one open decision per turn, applied and shown (args: the goal, or 'clear')",
+    aliases: ["design-workshop"],
+    handler: (args, ctx) => {
+      const cwd = ctx.cwd ?? process.cwd();
+      const text = (typeof args === "string" ? args : Array.isArray(args) ? args.join(" ") : "").trim();
+      const workshops = readWorkshops();
+      if (text === "clear" || text === "stop") {
+        delete workshops[cwd];
+        writeWorkshops(workshops);
+        writeTrace(cwd, "workshop_closed", {});
+        ctx.ui?.notify?.("Workshop closed. What is settled stays in the project; what was open is not carried forward.", "info");
+      } else if (text) {
+        workshops[cwd] = text;
+        writeWorkshops(workshops);
+        writeTrace(cwd, "workshop_opened", { goalChars: text.length });
+        ctx.ui?.notify?.(`Workshop open: ${text}\nOne decision per turn from here; every turn is told to work the loop.`, "info");
+      } else {
+        ctx.ui?.notify?.(
+          workshops[cwd] ? `Workshop open: ${workshops[cwd]}` : "No workshop open. Usage: /designer-workshop <goal> | clear",
+          "info",
+        );
+      }
+      ctx.editor?.setText?.("");
+    },
+  });
+
   pi.registerCommand("designer-canvas", {
     description: "Rebuild the project design canvas (every board and capture on one page) and report its path",
     aliases: ["design-canvas"],
@@ -1364,8 +1424,12 @@ export default function designerExtension(pi: ExtensionAPI): void {
     // and so a malformed flag file can only ever fall back to defaults.
     const { flags, sources: flagSources, ignored: flagsIgnored } = resolveFlags({ cwd });
     const fragments = fragmentNamesFor(userPrompt, cwd, flags);
+    // Workshop mode is per project, not per request: while it is open, every turn
+    // gets the loop and the goal, the way cc's canvas carries its own state.
+    const goal = workshopGoal(cwd);
+    if (goal && flags.workshop !== false && !fragments.includes("workshop")) fragments.push("workshop");
     // The vibe lives inside the prompt markers so re-injection strips it too.
-    const prompt = buildContract({ planOnly, fragments, vibe: vibeSection(cwd) });
+    const prompt = buildContract({ planOnly, fragments, vibe: vibeSection(cwd), workshop: goal });
     const prompts = stripDesignerPrompt(normalizeSystemPrompt(asRecord(event).systemPrompt));
     writeTrace(cwd, "prompt_injected", {
       version: 5,

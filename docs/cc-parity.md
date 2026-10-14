@@ -14,6 +14,7 @@ because the difference is the host, not the idea.
 | Prompt assembled per call | `getPromptForCommand(){ return await TBt() }` (73 hits) | `buildContract()`, `CONTRACT_FRAGMENTS` | **match** (shape) |
 | Conditional sections spliced by flag | `<!-- dataviz-callout -->` inside `artifact-design`; the paragraph appears only when the flag is on and the dataviz skill is present | four fragments (`motion`, `dataviz`, `forms`, `verify`) keyed on request words or an installed dependency | **match** (trigger differs: cc keys on artifact type + tenant flag, we key on the request) |
 | Tenant flags | ~885 `tengu_*` GrowthBook keys; `tengu_cobalt_plinth*` guards the Artifact surface | `OMP_DESIGNER_FLAGS` > `.omp/designer-flags.json` > defaults | **partial, by design** — we have no control plane, so the flag file *is* the tenant |
+| Working a design *with* the user, one decision at a time | `workshop` skill (40KB): decision blocks on the published page, the reader answers there, the choice returns to the session as a machine-readable record, the draft is republished; "Start building" ends it | `skills/workshop.md` + `/designer-workshop <goal|clear>`: per-project mode whose goal is injected into every turn with the loop (draft first, one open decision per turn, 2-4 options with consequences, apply-and-show, record settled/open), plus the same "narrate the deliverable, never the machinery" rule | **match in behaviour, narrower in mechanics** — the reader answers in the session rather than by clicking the page, because a local page has no path back into the session |
 | Skills as the doctrine channel | 243 assets; `artifact-design` (`SKILL-10242110`, 21KB), `artifact-diagramming`, `artifact-components`, `artifact-data-table`, `artifact-explainer`, `artifact-report`, `artifact-pr-review`, `workshop`, `whiteboard`, `prototype`, `design`, `design-sync`, `dataviz` + 7 references (47KB) | 8 skills: `designer-master`, `design-md`, `expression`, `animate`, `review-skill`, `run`, `run-skill-generator`, `dataviz` | **partial** — doctrine and data display covered; the artifact-*type* family has no home without a publish surface (see below) |
 | Every skill carries a trigger | `whenToUse` (98 hits); e.g. `artifact-design`'s says "Load before writing any artifact, including a skill-instructed Markdown one" | `when_to_use` on all 8, with offer discipline on the ones that self-offer | **match** |
 | Skills listed in full when bundled | `skill_listing` attachment; `source === "bundled"` is exempt from the listing character budget | all 8 listed with full descriptions | **match at our scale** (no budget pressure with 8 files) |
@@ -64,7 +65,12 @@ feature:
    (`ok (2 captures, 0 console errors, 3 layout warnings)`). Still missing from
    `ArtifactCheck`'s list: a dark-mode pass and blocked-load attribution beyond
    request failures.
-3. **Artifact-type analogues, deliberately scoped.** `artifact-explainer`,
+3. **The interactive half of the workshop.** cc's decision blocks live *on the
+   published page* and their clicks return to the session (`window.claude.use`,
+   the page's machine-readable record). Locally the analogous loop would be a
+   `designer_check`-style tool the page can call back into — possible, but it needs
+   a local server that the session polls, so it is a bigger piece than it looks.
+4. **Artifact-type analogues, deliberately scoped.** `artifact-explainer`,
    `artifact-report`, `artifact-data-table`, `artifact-diagramming` are *publishable
    artifact types* in cc. Locally the deliverable is a real page or route, so if we
    port them, they should be templates for project pages — not a fake publish

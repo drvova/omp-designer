@@ -129,7 +129,7 @@ omp.default(host.api as never);
 
 describe("P2: OMP hook registration", () => {
   test("registers the documented commands and hooks, and no tool gate", () => {
-    expect(host.commands).toEqual(["designer", "designer-vibe", "designer-canvas", "designer-doctor"]);
+    expect(host.commands).toEqual(["designer", "designer-vibe", "designer-workshop", "designer-canvas", "designer-doctor"]);
     expect(host.handlers.has("before_agent_start")).toBe(true);
     expect(host.handlers.has("resources_discover")).toBe(true);
     expect(host.handlers.has("session_stop")).toBe(true);
@@ -137,9 +137,9 @@ describe("P2: OMP hook registration", () => {
     expect(host.handlers.has("tool_result")).toBe(false);
   });
 
-  test("resources_discover exposes exactly the eight skill resources", () => {
+  test("resources_discover exposes exactly the nine skill resources", () => {
     const result = host.fire("resources_discover", {}, { cwd: process.cwd() }) as { skillPaths: string[] };
-    expect(result.skillPaths).toHaveLength(8);
+    expect(result.skillPaths).toHaveLength(9);
     expect(result.skillPaths.every((p) => p.startsWith(omp.PACKAGE_ROOT) && p.endsWith(".md"))).toBe(true);
   });
 
@@ -502,7 +502,7 @@ describe("P2: taste-review bridge", () => {
     expect(report).toContain("Driver: present");
     expect(report).toContain("Run skill (project): none");
     expect(report).toContain("Canvas: none");
-    expect(report).toMatch(/Skill context: 8 files, [\d.]+KB if all were read/);
+    expect(report).toMatch(/Skill context: 9 files, [\d.]+KB if all were read/);
   });
 
   test("the /designer-canvas command builds the sheet and the doctor sees it", () => {
@@ -586,6 +586,29 @@ describe("P2: duplicate load and loader realms", () => {
     realm2.default(host2.api as never);
     expect(host2.commands).toHaveLength(0);
     expect(host2.handlers.size).toBe(0);
+  });
+});
+
+describe("P2: workshop mode", () => {
+  test("opening a workshop injects the loop and the goal into every turn", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omp-e2e-workshop-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "workshop-fixture", private: true }));
+    const handler = host.commandOptions.get("designer-workshop")?.handler as (args: string, ctx: unknown) => void;
+    const notices: string[] = [];
+    handler("a pricing page for oak tables", { cwd: dir, ui: { notify: (text: string) => notices.push(text) }, editor: { setText: () => {} } });
+    expect(notices.join(" ")).toContain("Workshop open: a pricing page for oak tables");
+
+    const injected = host.fire("before_agent_start", { prompt: "now the pricing section", systemPrompt: ["base"] }, { cwd: dir }) as { systemPrompt: string[] };
+    const prompt = injected.systemPrompt.at(-1) ?? "";
+    expect(prompt).toContain("This project is in workshop mode");
+    expect(prompt).toContain("Workshop goal, in the user's words: a pricing page for oak tables");
+    expect(prompt).toContain("workshop.md");
+
+    // Closing it stops the injection: the mode is per project and must be reversible.
+    handler("clear", { cwd: dir, ui: { notify: (text: string) => notices.push(text) }, editor: { setText: () => {} } });
+    const after = host.fire("before_agent_start", { prompt: "now the pricing section", systemPrompt: ["base"] }, { cwd: dir }) as { systemPrompt: string[] };
+    expect(after.systemPrompt.at(-1) ?? "").not.toContain("This project is in workshop mode");
   });
 });
 

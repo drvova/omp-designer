@@ -35,16 +35,16 @@ afterAll(() => {
 describe("v5 extension", () => {
   test("registers once without a tool gate", () => {
     module.default(api);
-    expect(commands.map((command) => command.name)).toEqual(["designer", "designer-vibe", "designer-canvas", "designer-doctor"]);
+    expect(commands.map((command) => command.name)).toEqual(["designer", "designer-vibe", "designer-workshop", "designer-canvas", "designer-doctor"]);
     expect(handlers.has("tool_call")).toBe(false);
     expect(handlers.has("tool_result")).toBe(false);
   });
 
-  test("discovers exactly eight package-relative skills", () => {
+  test("discovers exactly nine package-relative skills", () => {
     const handler = handlers.get("resources_discover")?.[0];
     expect(handler).toBeDefined();
     const result = handler?.({}, { cwd: process.cwd() }) as { skillPaths: string[] };
-    expect(result.skillPaths).toHaveLength(8);
+    expect(result.skillPaths).toHaveLength(9);
     expect(result.skillPaths.every((path) => path.startsWith(module.PACKAGE_ROOT))).toBe(true);
   });
 

@@ -99,6 +99,7 @@ migration. Automation can override state with `OMP_DESIGNER_MODE`.
 | run | the app has to be launched, driven, or captured |
 | run-skill-generator | launching the app took real work and belongs in a project run skill |
 | dataviz | numbers are drawn rather than listed |
+| workshop | the user is deciding the design with you |
 
 No skill-read order is technically enforced. Prompt contract tests protect the
 important behavior: immediate-build requests do not trigger questionnaires, small
@@ -236,7 +237,7 @@ surface changed this session and the project holds no capture — fires only for
 substantive work (the same `filesScanned >= 3` bar that asks for `DESIGN.md` and
 `PRODUCT.md`), keeping the demand proportional to a real frontend delivery. The
 last state also appears in `/designer-doctor`, next to the skill set's context
-cost (`8 files, 56KB if all were read; largest designer-master 17KB`): the
+cost (`9 files, 60KB if all were read; largest designer-master 17KB`): the
 contract is a few KB per turn, and the skills are a ceiling paid only for the ones
 a turn actually opens.
 
