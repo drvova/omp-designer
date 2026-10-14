@@ -10,3 +10,4 @@ test-output/
 *.webp
 omp-session-*.html
 bun.lock
+evals/results/

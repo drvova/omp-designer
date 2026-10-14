@@ -33,7 +33,7 @@ because the difference is the host, not the idea.
 | Output-sandbox constraints | Google Fonts is the only permitted font host (else `@font-face` data URI); libraries only as pinned UMD from cdnjs, ≥2 weeks old, stylesheet inlined; page assets ship with the page | nothing equivalent | **not portable** — a CSP of cc's hosted artifact runtime; the local-project analogue is the project's own asset policy (pin versions, don't inline a library's source, don't hotlink unlicensed media) |
 | Drivers per project type | `run` skill: CLI, server, TUI (tmux), Electron `_electron` REPL, browser `chromium-cli`, library smoke; `run-skill-generator` commits the driver as the deliverable | `run`, `run-skill-generator`, `designer-driver.mjs` for web/static; the other types are documented patterns | **partial** — web is a real driver; Electron/TUI/server are instructions, not shipped code |
 | Usage + cost reporting | `/skill-doctor` (usage and context cost) | `shared/skill-usage.mjs` (named vs body-read) + the `Skill context:` doctor line | **match** |
-| Model-graded eval | `claude plugin eval` / `plugin eval init` with graders, `plugin-eval.md` (79.9KB) | `real-agent-eval.mjs` (manual, model-backed, not in `npm test`) | **gap — this is Phase 4** |
+| A graded eval suite | `claude plugin eval`: `evals/<case>/prompt.md` + `graders/*.md`; grader types `regex`, `tool_used`, `tool_order`, `file_exists`, `llm`, `baseline`; targets `last_message`/`trace`/`files`/a produced file; with/without arms; results JSON v1; exit 0/1/2 | `scripts/designer-eval.mjs` with the same case layout and the generic graders, plus three of our own — `driver_ran`, `captures_fresh`, `claims_consistent` — and `--ablation with-without`, `--session`/`--transcript` for grading without a model, results JSON in the same shape and the same exit codes | **match** — narrower than cc's mocks, sandbox and cost ceiling, and broader where it matters here: the honesty graders are first-class |
 | Artifact comments / data store | `ArtifactComments`, `ArtifactData` (`read_db`, `write_db`) | none (traces only) | **not portable** — there is no hosted artifact store in a local project |
 
 ## What the diff actually says
@@ -55,10 +55,11 @@ feature:
 
 ## Concrete next steps, in order
 
-1. **Phase 4 — grade it.** Extend `real-agent-eval.mjs` with graders matching cc's
-   `plugin eval`: did the session run the driver, produce captures after the last
-   source edit, and avoid a claim its record contradicts. (`designer_check` now
-   gives a grader an unambiguous signal to look for: a `designer_check` trace event.)
+1. ~~**Phase 4 — grade it.**~~ — **done**: `designer-eval` ships three cases with
+   graders for exactly those three questions, the graders are themselves graded in
+   `npm test`, and `--ablation with-without` gives the delta against a session with
+   no plugin. What is still missing from cc's harness: mocked MCP servers, a
+   cost ceiling, and a judge model wired by default.
 2. ~~Close the diagnostic gap that needs no host~~ — **done**: the driver now
    measures horizontal overflow past the viewport and rendered text contrast on the
    live DOM at each width, prints them, and the summary carries them

@@ -19,6 +19,7 @@ const pkg = JSON.parse(read("package.json"));
 const piAdapter = read("extensions/designer.ts");
 const installation = read("docs/installation.md");
 const parity = read("docs/cc-parity.md");
+const evalDoc = read("docs/eval.md");
 
 const checks = [
   ["package ships the shared core (incl. security.mjs)", pkg.files.some((f) => f === "shared/security.mjs" || f === "shared/" || f === "shared")],
@@ -52,6 +53,8 @@ const checks = [
   ["installation doc names the verification and the guard", /check:link/.test(installation) && /realpath/.test(installation)],
   ["README points at the installation doc", /docs\/installation\.md/.test(readme)],
   // The parity doc must keep naming what is not portable, not just what matches.
+  ["eval doc documents every grader type", /driver_ran/.test(evalDoc) && /captures_fresh/.test(evalDoc) && /claims_consistent/.test(evalDoc) && /skipped/.test(evalDoc)],
+  ["README points at the eval doc", /docs\/eval\.md/.test(readme)],
   ["parity doc cites the extracts and marks the gaps", /cc-2296|claude\.js/.test(parity) && /not portable/.test(parity) && /artifact-design/.test(parity)],
   ["architecture skills table lists four skills", /designer-master[\s\S]*design-md[\s\S]*animate[\s\S]*review-skill/i.test(architecture)],
 

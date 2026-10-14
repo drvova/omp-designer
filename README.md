@@ -39,6 +39,9 @@ npm run install:local:clean   # uninstall + link + gate, then restart omp
 npm run check:link            # prove the registered plugin is this checkout
 ```
 
+Measuring the harness itself (did the session render the page, capture it after its
+last edit, and tell the truth about it): [docs/eval.md](docs/eval.md).
+
 Full detail, the four verification proofs, and the symptoms of a published copy
 being live: [docs/installation.md](docs/installation.md).
 
@@ -333,6 +336,8 @@ shared/security.mjs              shared secret patterns for redaction and releas
 skills/                          nine skills (incl. run, run-skill-generator, dataviz, workshop)
 scripts/designer-driver.mjs      browser driver: captures, console errors, driver-report.json
 scripts/designer-canvas.mjs      canvas: every board and capture on one page (+ canvas.json)
+scripts/designer-eval.mjs        eval suite: cases + graders, with/without arms (docs/eval.md)
+evals/                           the shipped cases (prompt.md + graders/*.md)
 scripts/check-plugin-link.mjs    proves the installed plugin is this checkout, not the npm copy
 data/ui-ux-pro-max/              palette and typography search data
 scripts/fix-ai-slop.mjs          evidence-aware copy validator

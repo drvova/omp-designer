@@ -260,6 +260,21 @@ evidence: it does not prove a live OMP host emits identical event shapes, and it
 does not drive a real model. `e2e-smoke.mjs --real-omp` reports `SKIPPED` (never
 `PASS`) when OMP or credentials are absent.
 
+## Grading the harness
+
+`scripts/designer-eval.mjs` runs `evals/<case>` suites the way `claude plugin eval`
+does: a prompt plus declarative graders, a throwaway project, a real `omp -p`
+session, and a results document with exit codes (0 all, 1 none, 2 partial). Its
+graders are `regex`, `tool_used`, `tool_order`, `file_exists`, `trace_event`, an
+optional `llm` judge, and three that encode this project's contract — `driver_ran`,
+`captures_fresh`, `claims_consistent`. A grader with nothing to look at reports
+`skipped` and cannot carry a case.
+
+The grading path is deterministic and tested (`test:eval-graders`,
+`test:eval-runner`); only the model-backed arms are manual. `--session` with
+`--transcript` grades a session that already happened, which is how the runner and
+its graders are exercised in `npm test` without spending a model call.
+
 ## Release boundary
 
 `check-release.mjs` inspects `npm pack --dry-run --ignore-scripts`, verifies the
